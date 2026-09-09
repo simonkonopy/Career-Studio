@@ -1,0 +1,75 @@
+# Career Studio security handoff
+
+**Code reviewed: 2026-09-09. Status: pilot foundation, not a security certification or completed production audit.** This document describes the API-backed server in this repository. Passing automated checks establishes specific behavior; it does not prove the absence of vulnerabilities. The operator must complete the release gates below before collecting real customer resumes. See [operations](OPERATIONS.md) for deployment and restoration commands.
+
+## Ownership and reporting
+
+Before inviting customers, record the accountable engineering owner, backup operator, and a monitored private security-report address in the deployment runbook. Configure GitHub private vulnerability reporting if available for the chosen repository. Do not ask reporters to attach resumes, passwords, recovery codes, session cookies, or provider tokens to a public issue. Record a release owner and an incident decision maker; neither role is implemented by an application admin screen.
+
+## Assets and trust boundaries
+
+The sensitive assets are customer contact details, imported resume text, employment and education history, interview messages, task-level skill claims, resume snapshots, applications, authentication material, and the operator's AI budget. A database or backup compromise exposes career records even though passwords, recovery codes, and session tokens are hashed.
+
+| Boundary / plausible failure | Implemented protection | Remaining work or limit |
+| --- | --- | --- |
+| Internet → server: account abuse, forged requests, resource exhaustion | Exact host and mutation-origin checks; authenticated mutations also require a session-bound CSRF token. Request size/time limits, per-IP throttles, authentication concurrency limit. | Deploy HTTPS and correctly configured trusted proxy peers. Add edge abuse controls and monitoring. In-memory throttles reset on restart and are not shared between replicas. |
+| Customer A → customer B's records | The authenticated session supplies `user_id`; private queries and updates scope records to that owner. Resume attachments must belong to the account and be approved. | Re-run two-account tests for every new endpoint and schema change. UUIDs and a hidden button are never authorization. Support tools must enforce their own access boundary. |
+| Uploaded document → parser → profile | Size/type checks, bounded parsing workers, plain extracted text, review required after import. | Worker threads are not an OS sandbox. They share the application's user privileges, environment, and potential filesystem/network access. |
+| Resume, posting, or conversation → AI → saved claims | Untrusted inputs are described as data. The model has no executable tools. Strict output validation, quoted evidence, allowed update paths, revision checks, and explicit customer approval. | A matching quote does not establish that a claim is true or that its paraphrase is faithful. Prompt injection and fabricated implications still need adversarial evaluation and human review. |
+| Server → provider / job feed | AI key stays server-side; best-effort contact redaction; fixed provider destinations, redirect refusal, response bounds and timeouts. Public feed search happens locally. | Career context can identify a person after redaction. Confirm provider processing/retention settings and commercial source rights before launch. |
+| Host / CI / dependency → all customers | Non-root runtime image, lockfile install, restricted build context, private database permissions, read-only GitHub workflow permission. | A compromised dependency or host can reach server secrets and customer data. Hosting, encrypted storage, patching, artifact provenance and administrator access remain operator responsibilities. |
+
+Evidence: [server](../server.js), [store](../lib/store.js), [AI adapter](../lib/ai.js), [documents](../lib/documents.js), [job feed](../lib/jobs.js), [Dockerfile](../Dockerfile), [CI](../.github/workflows/ci.yml).
+
+## Controls already in code
+
+**Accounts and sessions.** Passwords use a random salt and Node's scrypt; accepted passwords are 12–128 characters. High-entropy recovery codes and session tokens are stored as hashes. Cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` in production, with seven-day expiry. Recovery rotates the recovery code and revokes existing sessions. Logout revokes that session; account deletion requires the password and removes live account rows through cascading relationships. SQL values use bound parameters. Email is currently an unverified account identifier, not proof of ownership. See [auth](../lib/auth.js), [store](../lib/store.js), and the registration, ownership, recovery, export and deletion checks in [server tests](../tests/server.test.js).
+
+**Browser and HTTP boundary.** The server serves an explicit static-file allowlist; it does not expose the data directory. Responses disable caching, set `nosniff`, deny framing, and use a Content Security Policy that permits scripts and connections only from the same origin. Inline styles remain permitted. Production adds HSTS. The UI escapes untrusted text; uploaded or AI-generated HTML is not used as executable UI. Host, origin and CSRF checks complement authentication; they do not replace it. Production startup requires HTTPS origin, an invitation code and exact trusted proxy IPs. Check [server](../server.js), [UI](../public/app.js), and hostile-request/upload cases in [server](../tests/server.test.js) and [browser tests](../tests/browser.test.js).
+
+**AI authority and spend.** The adapter calls Responses with `store: false`, bounded input/output, timeout and strict JSON shape. It receives no application session, shell, browser or tools. Customer consent gates AI use; revocation and deletion cancel active requests. Quotes must come from customer source material, not previous assistant messages or a job's requirements. Proposed changes are validated and remain pending until selected by the customer; changing the profile invalidates stale suggestions. Custom skill labels are bounded and checked for unsafe keys and normalization collisions. Resumes preserve independent versus assisted task ratings. These protections do not turn a self-report into verified proficiency. See [AI/model](../lib/ai.js), [store approval logic](../lib/store.js), and [AI](../tests/ai.test.js) / [model tests](../tests/resume-model.test.js).
+
+Per-customer and global daily attempt counters persist in SQLite; request IDs prevent repeat charging for the same recorded operation. Active requests are limited per customer and process. These are **request limits, not a guaranteed dollar cap**. Keep operator provider credentials in a dedicated project and inspect actual spend. Model rates, retries, prompt size, and provider behavior still matter.
+
+**Files and public job data.** Uploads support PDF, DOCX and UTF-8 TXT, up to 8 MB. Parser output is capped at 200,000 characters; PDFs at 50 pages; DOCX expansion at 32 MB, with actual expansion checked. Two document workers share a process-wide limit and terminate after their bounded processing window. PDF evaluation is disabled; DOCX external-file access is disabled. Uploaded bytes are not intentionally written to disk, but extracted text is saved after import and host-level swap/crash behavior is outside this guarantee. User posting URLs are stored, not fetched by the server. Remotive is fetched from one fixed destination and receives no resume or customer search term. See [document tests](../tests/documents.test.js) and [job tests](../tests/jobs.test.js).
+
+## Work required before launch
+
+| Priority / owner | Concrete action and acceptance evidence |
+| --- | --- |
+| Before pilot · deployment owner | Run one process on a persistent private volume behind HTTPS. Restrict direct app-port access. Proxy must overwrite `X-Forwarded-For` with one actual client IP and preserve Host/Origin. Test spoofed forwarding, two separate clients, cookie flags and hostile origins on the deployed host. |
+| Before pilot · data owner | Enable encrypted host storage and encrypted off-host backups with separate access control. Set retention and recovery targets, automate snapshots, and restore one into an isolated environment. Record measured recovery time and lost-data window. Filesystem permissions and the supplied backup script do not encrypt or schedule anything. |
+| Before pilot · account/support owner | Publish the unverified-email and recovery-code behavior accurately. Never recover an account solely because someone controls or claims its email address. Define a supported identity-proof process. Implement verified-email recovery and stronger authentication before broad self-service launch; do not improvise a support bypass. |
+| Before pilot · engineering owner | Exercise real provider access using synthetic careers: assistance, corrections, unfamiliar skills, malicious resumes/postings, malformed responses, consent revocation and interrupted requests. Review factual fidelity and actual cost. Existing provider tests use mocks and cannot validate live model quality or a production project's settings. |
+| Before pilot · operations owner | Configure alerting for elevated errors, disk usage, restarts, backup age, quota exhaustion and provider costs. Add minimal security events for failed sign-ins, recovery, session revocation, consent changes, deletion and administrative actions. Use timestamps, event types and opaque identifiers; redact bodies, query content and credentials. The repository does not supply a complete audit/alert service. |
+| Before paid public launch · engineering owner | Add account-level and distributed abuse controls appropriate to the deployment, limits/retention for accumulated interviews, resumes, applications and request receipts, and load tests for upload/export/auth pressure. Individual request bounds do not bound total database growth. |
+| Before paid public launch · security owner | Review dependencies and licenses, pin reviewed CI actions and runtime images to immutable revisions, enable dependency/secret alerts, protect the release branch and require checks/review. Inspect the production image and validate parser containment; isolate parsing into a restricted service if serving untrusted uploads broadly. |
+| Before paid public launch · business/data owner | Complete privacy, provider-processing, deletion/retention, incident-contact and job-source terms. Add and validate billing entitlements and cancellation/refund behavior separately. Charging customers does not itself provide access isolation or budget enforcement. |
+
+Keep deployment credentials out of `.env` files committed to Git, container layers, generated decks and support screenshots. The [.gitignore](../.gitignore) and [.dockerignore](../.dockerignore) are packaging controls, not a secret scanner. Review the actual source archive and Git history before transfer. Rotate anything exposed; removing a file from the latest commit is insufficient.
+
+For database recovery, follow the [restore procedure](OPERATIONS.md#backup-and-restoration): use a consistent online backup, restore into a fresh directory without old WAL files, invalidate all restored sessions, and reconcile customer deletions that happened after the snapshot. Deleting live rows does not immediately erase SQLite free pages, WAL history, backups or provider-held records. Keep an access-controlled deletion ledger without retaining the deleted resume content.
+
+## Subscription or local-companion boundary
+
+The inspected API server does not implement customer ChatGPT subscription authentication. A proposed integration must be checked against the provider's supported authentication and product terms at implementation time; do not describe an API key as a linked ChatGPT subscription.
+
+Follow [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md) for the proposed ChatGPT plugin's OAuth/MCP threat boundary, scoped authorization, account mapping, revocation, and customer-action approval receipts. These controls must be implemented and tested separately; the existing browser session/CSRF system does not automatically secure an MCP endpoint. The plugin must not receive OpenAI credentials or silently invoke the operator-funded AI adapter.
+
+If a supported local companion is added, treat it as a separate release: keep provider login credentials in the provider-managed client or OS credential store; never ask customers to upload login cookies, password files or session tokens to the SaaS. Bind local listeners to loopback, require authenticated pairing and exact allowed origins, and prevent arbitrary websites from sending requests. A browser callback is not permission to read files, run commands, submit applications or access other local accounts. Show the specific requested action and get customer approval before expanding those capabilities. Support disconnect, credential revocation, local cleanup and visible cost/usage-source status. No local-credential transport, command execution or OAuth callback is authorized merely by an AI-generated message.
+
+## Release verification and incident response
+
+For each release, the owner should record the commit/image, review outcome and these checks:
+
+- Run `npm ci`, `npm run check`, `npm run test:unit`, `npm run test:browser`, and build the runtime image. Investigate failures; do not use a green run from another revision as evidence.
+- On staging with synthetic accounts, test cross-account profile/resume/application/proposal access; recovery and session expiry; CSRF/origin/proxy behavior; hostile document/text input; AI approval and cancellation; restart persistence; export/deletion and restore.
+- Confirm secrets are injected only at runtime, storage/backups are private and encrypted, the public feed remains public, the incident contact is reachable, and alerts reach an accountable operator.
+
+If a leak or compromise is suspected:
+
+1. Assign an incident owner and record discovery time, affected deployment and known scope without copying customer content into ordinary chat or issues.
+2. Contain at the appropriate boundary: restrict public traffic, disable AI by removing/revoking the provider key and restarting, or isolate a parser/host. Rotating the invitation code only blocks future registrations; it does not revoke accounts or sessions.
+3. Preserve necessary logs and snapshots in restricted evidence storage before destructive repair. Revoke affected secrets and sessions. There is no application admin revocation console; use a controlled maintenance procedure against the correct database.
+4. Determine exposure and affected customers, involve the responsible privacy/legal decision maker, and issue accurate notices through the agreed incident process. Do not guess whether data was accessed.
+5. Patch, rebuild from reviewed source and restore only after the verification above. Reconcile deletions and invalidate restored sessions. Record cause, scope, recovery, follow-up owners and tests that prevent recurrence.

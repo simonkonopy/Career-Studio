@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "product": "Career Studio",
+  "updated": "2026-09-09",
+  "path_base": "Paths in path and embedded_in.deck are relative to the standalone product repository root. Origin paths document the previous workspace and are not runtime dependencies.",
+  "asset_scope": "Four final decorative JPEGs used in the delivered 29-slide Fable theme. Files are copied unchanged. No obsolete cover, private build scripts, screenshots or font binaries are included here.",
+  "reference_deck": {
+    "path": "docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx",
+    "slide_count": 29,
+    "sha256": "e606aea3a6a8f6a8bacb101cd8ebe9c92141582bd493d0d7b768e19396f8401a"
+  },
+  "provenance_note": "Fable 5 is the user\u2019s name for the design update. The preserved design specification names its owner Fable (manager). Existing README documentation calls the artwork Higgsfield artwork. These statements describe recorded provenance only.",
+  "assets": [
+    {
+      "path": "docs/design/assets/cover-hero.jpg",
+      "media_type": "image/jpeg",
+      "bytes": 71581,
+      "width_px": 1600,
+      "height_px": 893,
+      "sha256": "694e1de0cf25e054bfcb4a6b14ef3354d80082e07c5215c7f9c6bbc7406378c2",
+      "usage": "Cover artwork, full slide with title over the empty left area.",
+      "embedded_in": [
+        {
+          "deck": "docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx",
+          "slide": 1,
+          "media_part": "ppt/media/image.jpeg",
+          "identical_bytes": true
+        }
+      ],
+      "origin": {
+        "design_owner_documented_as": "Fable (manager)",
+        "source_asset_in_original_workspace": "handoff/deck-v3/assets/opt/cover-hero.jpg",
+        "source_documentation": "The original handoff/deck-v3/README.md describes the artwork as Higgsfield artwork. The original DESIGN_SPEC.md identifies Fable as design owner. This records the existing documentation and does not establish a license or new generation claim."
+      }
+    },
+    {
+      "path": "docs/design/assets/section-1.jpg",
+      "media_type": "image/jpeg",
+      "bytes": 44411,
+      "width_px": 893,
+      "height_px": 1600,
+      "sha256": "8942f721aad01ca9bc40f5db87c662e1e5fc9dff74f23102fb4c73b1a74627f4",
+      "usage": "Part 1 divider: What the product does. Right-side artwork.",
+      "embedded_in": [
+        {
+          "deck": "docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx",
+          "slide": 4,
+          "media_part": "ppt/media/image2.jpeg",
+          "identical_bytes": true
+        }
+      ],
+      "origin": {
+        "design_owner_documented_as": "Fable (manager)",
+        "source_asset_in_original_workspace": "handoff/deck-v3/assets/opt/section-1.jpg",
+        "source_documentation": "The original handoff/deck-v3/README.md describes the artwork as Higgsfield artwork. The original DESIGN_SPEC.md identifies Fable as design owner. This records the existing documentation and does not establish a license or new generation claim."
+      }
+    },
+    {
+      "path": "docs/design/assets/section-2.jpg",
+      "media_type": "image/jpeg",
+      "bytes": 49266,
+      "width_px": 893,
+      "height_px": 1600,
+      "sha256": "08e3ea9ed9cbc792746f96ed1692349803e02da56b1efb87a8376734de8ecaa4",
+      "usage": "Part 2 divider: What is built and how to run it. Right-side artwork.",
+      "embedded_in": [
+        {
+          "deck": "docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx",
+          "slide": 14,
+          "media_part": "ppt/media/image3.jpeg",
+          "identical_bytes": true
+        }
+      ],
+      "origin": {
+        "design_owner_documented_as": "Fable (manager)",
+        "source_asset_in_original_workspace": "handoff/deck-v3/assets/opt/section-2.jpg",
+        "source_documentation": "The original handoff/deck-v3/README.md describes the artwork as Higgsfield artwork. The original DESIGN_SPEC.md identifies Fable as design owner. This records the existing documentation and does not establish a license or new generation claim."
+      }
+    },
+    {
+      "path": "docs/design/assets/section-3.jpg",
+      "media_type": "image/jpeg",
+      "bytes": 53212,
+      "width_px": 893,
+      "height_px": 1600,
+      "sha256": "869dbd457070cd01efa6fb6d57e15441aa7fa2834517d4f58f4aae22ccc6b5c1",
+      "usage": "Part 3 divider: How to pilot and sell it. Right-side artwork.",
+      "embedded_in": [
+        {
+          "deck": "docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx",
+          "slide": 23,
+          "media_part": "ppt/media/image4.jpeg",
+          "identical_bytes": true
+        }
+      ],
+      "origin": {
+        "design_owner_documented_as": "Fable (manager)",
+        "source_asset_in_original_workspace": "handoff/deck-v3/assets/opt/section-3.jpg",
+        "source_documentation": "The original handoff/deck-v3/README.md describes the artwork as Higgsfield artwork. The original DESIGN_SPEC.md identifies Fable as design owner. This records the existing documentation and does not establish a license or new generation claim."
+      }
+    }
+  ]
+}

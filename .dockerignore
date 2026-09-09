@@ -1,0 +1,15 @@
+# Allow only runtime sources into the build context.
+**
+!package.json
+!package-lock.json
+!server.js
+!lib/
+!lib/**
+!public/
+!public/*.html
+!public/*.js
+!public/*.css
+!scripts/
+!scripts/backup.js
+!Dockerfile
+!.dockerignore

@@ -1,0 +1,17 @@
+{
+  "name": "career-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Customer career profiles, evidence-based resume interviews, and a job-search CRM",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node --test tests/*.test.js",
+    "test:unit": "node --test tests/resume-model.test.js tests/ai.test.js tests/documents.test.js tests/jobs.test.js tests/server.test.js tests/backup.test.js",
+    "test:browser": "node --test tests/browser.test.js",
+    "backup": "node scripts/backup.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/demo.js"
+  },
+  "dependencies": { "docx": "9.7.1", "mammoth": "1.12.2", "pdf-parse": "2.4.5" },
+  "devDependencies": { "playwright-core": "1.62.1" }
+}
