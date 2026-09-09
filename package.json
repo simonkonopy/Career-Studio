@@ -6,8 +6,9 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
+    "start:companion": "node --env-file-if-exists=.env scripts/start-companion.js",
     "test": "node --test tests/*.test.js",
-    "test:unit": "node --test tests/resume-model.test.js tests/ai.test.js tests/documents.test.js tests/jobs.test.js tests/server.test.js tests/backup.test.js",
+    "test:unit": "node --test tests/resume-model.test.js tests/ai.test.js tests/documents.test.js tests/jobs.test.js tests/server.test.js tests/backup.test.js tests/companion-server.test.js tests/companion.test.js",
     "test:browser": "node --test tests/browser.test.js",
     "backup": "node scripts/backup.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/demo.js"

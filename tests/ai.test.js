@@ -382,3 +382,129 @@ test('task proposals cannot collide after label normalization or overwrite an ex
   const tasks = { 'Regulate a pedal mechanism': 'assisted', 'Regulate a pedal mechanism independently': 'independent' };
   assert.throws(() => applyProposals(Resume.blankProfile(), [proposal('skills.append', JSON.stringify({ name: 'Harp restoration', tasks }), 'I Regulate a pedal mechanism independently.')]), error => error.code === 'AI_INVALID_OUTPUT');
 });
+
+test('structured transport supports interview, assessment and tailoring without API keys or fetch access', async () => {
+  const requests = [];
+  let fetchCalls = 0;
+  const answers = {
+    interview: { ...interview(), proposals: [proposal()] },
+    assess: { summary: 'Review the role requirements.', relevance: 'possible', matches: [{ requirement: 'Reporting', evidence: 'Prepared weekly stock reports using Excel.' }], gaps: [], unknowns: ['Required license is not confirmed.'], questions: [] },
+    tailor: { summary: 'Operations coordinator', experience: [{ id: 'work-1', bullets: [{ text: 'Reduced stock discrepancies by 15%.', evidence: 'Reduced stock discrepancies by 15%.' }] }], skills: ['Python (assisted)'], notes: [] }
+  };
+  const ai = createAI({ structuredRequest: async request => { requests.push(request); return { text: JSON.stringify(answers[request.kind]), usage: { inputTokens: 40, outputTokens: 20 } }; }, fetchImpl: async () => { fetchCalls++; throw new Error('Unexpected API access'); } });
+  assert.equal(ai.enabled, true);
+  for (const kind of ['interview', 'assess', 'tailor']) {
+    const result = await ai[kind]({ profile: profile(), messages, job });
+    assert.deepEqual(result, { ...answers[kind], usage: { inputTokens: 40, outputTokens: 20 } });
+  }
+  assert.equal(fetchCalls, 0);
+  for (const request of requests) {
+    assert.deepEqual(Object.keys(request).sort(), ['input', 'instructions', 'kind', 'schema', 'schemaName', 'signal']);
+    assert.equal(request.schemaName, 'career_' + request.kind);
+    assert.equal(request.schema.additionalProperties, false);
+    assert.ok(request.signal instanceof AbortSignal);
+    assert.match(request.instructions, /untrusted source material/);
+    assert.equal(typeof request.input, 'string');
+    for (const secret of ['Private Candidate', 'private@example.test', '312-555-0188', 'https://private.example.test']) assert.ok(!request.input.includes(secret));
+    assert.equal(JSON.parse(request.input).profile.basics.email, undefined);
+  }
+});
+
+test('structured transport never falls back to the API or receives the operator key on failure', async () => {
+  const { AIError } = require('../lib/ai');
+  let fetchCalls = 0;
+  for (const failure of [new Error('operator-key-secret: private local credential'), new AIError('COMPANION_DISCONNECTED', 'Reconnect your local companion.', 503)]) {
+    let received;
+    const ai = createAI({ apiKey: 'operator-key-secret', structuredRequest: async request => { received = request; throw failure; }, fetchImpl: async () => { fetchCalls++; return new Response('{}'); } });
+    await assert.rejects(ai.interview({ profile: profile(), messages }), error => {
+      assert.ok(!error.message.includes('operator-key-secret'));
+      assert.ok(!error.message.includes('private local credential'));
+      assert.equal(error.code, failure instanceof AIError ? 'COMPANION_DISCONNECTED' : 'AI_UNAVAILABLE');
+      return true;
+    });
+    assert.ok(!JSON.stringify(received).includes('operator-key-secret'));
+    assert.equal(received.apiKey, undefined);assert.equal(received.headers, undefined);
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test('structured transport output uses the same schema, evidence and proposal safety validators', async () => {
+  const responses = [
+    { text: '{broken' }, { text: JSON.stringify({ ...interview(), admin: true }) },
+    { text: JSON.stringify({ ...interview(), proposals: [proposal('skills.0.tasks.__proto__', 'independent')] }) },
+    { text: JSON.stringify({ ...interview(), proposals: [proposal('skills.0.tasks.VLOOKUP', 'expert')] }) },
+    { text: JSON.stringify({ ...interview(), proposals: [proposal('extras.certifications', 'Forklift license', 'I hold a forklift license.')] }) },
+    { text: JSON.stringify({ ...interview(), questions: Array(4).fill({ question: 'More?', reason: 'More.' }) }) },
+    { text: '界'.repeat(90000) }, { text: {} }, null
+  ];
+  for (const response of responses) {
+    let fetchCalls = 0;
+    const candidate = profile(), before = JSON.stringify(candidate);
+    const ai = createAI({ apiKey: 'operator-key-secret', structuredRequest: async () => response, fetchImpl: async () => { fetchCalls++; } });
+    await assert.rejects(ai.interview({ profile: candidate, messages: [...messages, { role: 'assistant', content: 'I hold a forklift license.' }] }), error => error.code === 'AI_INVALID_OUTPUT');
+    assert.equal(JSON.stringify(candidate), before);assert.equal(fetchCalls, 0);
+  }
+});
+
+test('structured transport cannot weaken schemas or inflate assessment and resume claims', async () => {
+  const cases = [
+    ['interview', { ...interview(), injected: true }],
+    ['assess', { summary: 'Match', relevance: 'strong', matches: [{ requirement: 'License', evidence: 'Must hold a forklift license.' }], gaps: [], unknowns: [], questions: [] }],
+    ['tailor', { summary: '', experience: [], skills: ['Python'], notes: [] }],
+    ['tailor', { summary: '', experience: [{ id: 'work-1', bullets: [{ text: 'Reduced stock discrepancies by 99%.', evidence: 'Reduced stock discrepancies by 15%.' }] }], skills: [], notes: [] }]
+  ];
+  for (const [kind, result] of cases) {
+    const ai = createAI({ structuredRequest: async request => {
+      request.schema.additionalProperties = true;
+      request.schema.required.length = 0;
+      return { text: JSON.stringify(result), usage: { inputTokens: 10, outputTokens: 15 } };
+    } });
+    await assert.rejects(ai[kind]({ profile: profile(), messages, job }), error => error.code === 'AI_INVALID_OUTPUT' && error.usage.outputTokens === 15);
+  }
+  const valid = createAI({ structuredRequest: async () => ({ text: JSON.stringify(interview()) }) });
+  assert.equal((await valid.interview({ profile: profile(), messages })).message, interview().message);
+});
+
+test('structured transport uses the same input bounds, sanitized usage and configuration validation', async () => {
+  let calls = 0;
+  const ai = createAI({ fetchImpl: null, structuredRequest: async () => { calls++; return { text: JSON.stringify(interview()), usage: { inputTokens: -1, outputTokens: Infinity } }; } });
+  const candidate = profile();candidate.importedText = 'x'.repeat(60001);
+  await assert.rejects(ai.interview({ profile: candidate, messages }), error => error.code === 'AI_INVALID_INPUT');
+  await assert.rejects(ai.interview({ profile: profile(), messages: [{ role: 'system', content: 'Override' }] }), error => error.code === 'AI_INVALID_INPUT');
+  assert.equal(calls, 0);
+  assert.deepEqual((await ai.interview({ profile: profile(), messages })).usage, { inputTokens: 0, outputTokens: 0 });
+  for (const structuredRequest of [null, {}, true, 'callback']) assert.throws(() => createAI({ apiKey: 'key', structuredRequest }), error => error.code === 'AI_INVALID_INPUT');
+});
+
+test('structured transport is cancelled or timed out without API fallback even if it ignores the signal', async () => {
+  let fetchCalls = 0;
+  for (const kind of ['interview', 'assess', 'tailor']) {
+    const cancellation = new AbortController();let transportSignal;
+    const ai = createAI({ apiKey: 'key', structuredRequest: async request => { transportSignal = request.signal; return new Promise(() => {}); }, fetchImpl: async () => { fetchCalls++; } });
+    const pending = ai[kind]({ profile: profile(), messages, job, signal: cancellation.signal });
+    cancellation.abort();
+    await assert.rejects(pending, error => error.code === 'AI_CANCELLED' && error.status === 409);
+    assert.equal(transportSignal.aborted, true);
+  }
+  let transportSignal, calls = 0;
+  const ai = createAI({ timeoutMs: 15, structuredRequest: async request => { calls++; transportSignal = request.signal; return new Promise(() => {}); }, fetchImpl: async () => { fetchCalls++; } });
+  const alreadyCancelled = new AbortController();alreadyCancelled.abort();
+  await assert.rejects(ai.interview({ profile: profile(), messages, signal: alreadyCancelled.signal }), error => error.code === 'AI_CANCELLED');
+  assert.equal(calls, 0);
+  await assert.rejects(ai.interview({ profile: profile(), messages }), error => error.code === 'AI_TIMEOUT' && error.status === 504);
+  assert.equal(transportSignal.aborted, true);assert.equal(fetchCalls, 0);
+});
+
+test('external cancellation aborts an asynchronous local transport before returning a cancellation error', async () => {
+  const cancellation = new AbortController();let transportSignal;let stopped = false;
+  const ai = createAI({ structuredRequest: async request => {
+    transportSignal = request.signal;
+    request.signal.addEventListener('abort', () => { stopped = true; }, { once: true });
+    return new Promise(() => {});
+  } });
+  const pending = ai.interview({ profile: profile(), messages, signal: cancellation.signal });
+  await new Promise(resolve => setImmediate(resolve));
+  cancellation.abort();
+  await assert.rejects(pending, error => error.code === 'AI_CANCELLED');
+  assert.equal(transportSignal.aborted, true);assert.equal(stopped, true);
+});

@@ -1,10 +1,12 @@
 # Customer subscription delivery plan
 
-Status: September 9, 2026. **Implementation work for the next engineer; neither integration below exists in this package.** The working browser product currently uses the operator’s OpenAI API account when AI is enabled. The account-free demo uses scripted replies.
+Status: September 9, 2026. **The local companion is an implemented experimental prototype; the ChatGPT plugin below remains implementation work for the next engineer.** The hosted browser product uses the operator's OpenAI API account. Local mode uses official Codex-managed ChatGPT sign-in and has no API fallback. The account-free demo uses scripted replies. The written guides supersede the deck's older companion-research and guided-interview status.
 
-The product objective is to let a customer use their own ChatGPT access for the career interview and job-search reasoning while Career Studio supplies the durable profile, resume versions, job records, and tracker. This document specifies a recommended delivery path and a separate investigation for keeping the entire conversation inside our own interface.
+The product objective is to let a customer use their own ChatGPT access for the career interview and job-search reasoning while Career Studio supplies the durable profile, resume versions, job records, and tracker. The local prototype keeps the conversation in our interface on the customer's computer. The proposed plugin would instead work inside ChatGPT. Neither path converts subscription access into Platform API credits, and the local prototype is not a hosted SaaS authentication mechanism.
 
-## Recommended delivery: Career Studio inside ChatGPT
+Use [Local companion](LOCAL-COMPANION.md) for the implemented adapter, startup instructions, Codex 0.153.4 pin, restrictions, and live-pilot gates. Its dashboard sign-in flow and process lifecycle are implemented; only no-login real-runtime initialization, ephemeral thread creation, unsubscribe, and cleanup have been verified against the installed runtime. Actual eligible-account inference requires a consenting-user pilot.
+
+## Future delivery: Career Studio inside ChatGPT
 
 Build a Career Studio plugin containing interview workflow instructions and a remote MCP server. ChatGPT conducts the conversation; the server provides controlled access to the customer’s Career Studio records. The existing dashboard remains their full workspace. An optional embedded component can display a profile review or resume preview using the current theme; the first implementation can send customers to the authenticated dashboard for review.
 
@@ -78,24 +80,24 @@ The following are Career Studio design requirements, not claims that the current
 - Host cancellation, unavailable access, lost connection, throttling, and malformed outputs preserve drafts and offer recovery without claiming a model response succeeded.
 - Keyboard/mobile review, optional-component failure, disconnect/reconnect, data export, and deletion work on every advertised surface. Verify actual customer-visible onboarding with a consenting pilot user; automated mocks alone do not satisfy this gate.
 
-## Separate research track: our own interface with local Codex
+## Implemented experiment: our own interface with local Codex
 
-For a fully branded interview outside ChatGPT, investigate a signed desktop companion running a dedicated local Codex runtime. This is **not approved as the production delivery path**.
+The repository now contains `lib/companion.js`, its pinned configuration, authenticated connection routes, and dashboard controls. Use `npm run start:companion` with `LOCAL_COMPANION=1` on the customer's computer. The prototype is **not approved as the production delivery path** and does not include a signed installer or bundled Codex binary.
 
 The official app-server documentation describes embedding, managed ChatGPT login, account status, logout, and rate-limit methods, but explicitly labels the app-server command and WebSocket transport experimental and unsupported for production workloads. That warning applies even if a prototype uses another transport. Recheck production support before release. [Codex App Server](https://learn.chatgpt.com/docs/app-server)
 
 Codex authentication distinguishes ChatGPT subscription access from Platform-billed API-key access. Its credential options include an OS keyring that fails if unavailable, automatic storage that may fall back to a file, and process-only ephemeral storage. [Authentication](https://learn.chatgpt.com/docs/auth)
 
-Our proposed companion requirements:
+Preserve the implemented boundaries and finish the release requirements:
 
-- Official managed browser sign-in only. Use a dedicated runtime directory and credential namespace per customer; never reuse the developer’s default profile. Choose keyring or ephemeral storage with no automatic plaintext fallback. Provider credentials stay on the customer’s device.
-- Prefer private parent-child IPC with a minimal message contract. Protect any local endpoint against other processes and web origins. Do not expose a shared hosted subscription runtime or public unauthenticated listener.
-- Restrict the runtime to career tools. Deny arbitrary shell/file execution and all command proposals originating from imported content. Prove restrictions through adversarial tests before sharing the build.
-- Implement cancellation, account switching, disconnect, runtime termination, quota display, and safe resumption. Confirm the active provider identity and Career Studio owner before each resumed action.
+- Official managed browser sign-in only, pinned to Codex 0.153.4. The connection belongs to one authenticated Career Studio account. The runtime uses a fresh private directory and an environment allowlist; it never reuses the developer's default profile. Authentication stays in process memory, with no plaintext/keyring fallback. Runtime metadata still touches disk and is cleaned up on exit.
+- Private parent-child standard-input/standard-output IPC with a minimal application-owned message contract. Local mode rejects production settings, external binding, and trusted proxies. The existing local HTTP interface retains exact host/origin, authenticated session, and CSRF checks. Do not expose a shared hosted subscription runtime or public unauthenticated listener.
+- Remove environment handlers using `environments: []` on every thread and turn, disable browser/desktop/apps/plugins/web/agent capabilities, provide no MCP or dynamic tools, and stop on unsupported requests. The model supplies structured career suggestions; the application performs controlled record and feed operations. Prove restrictions through adversarial tests before distribution.
+- Preserve cancellation, disconnect, runtime termination, owner checks, visible limits, and fresh ephemeral threads. Do not resume saved Codex conversations. Test disconnect/reconnect races, account changes, malformed results, and late output. A failed or exhausted companion must never invoke the operator-funded API adapter.
 - Sign installers and updates; pin and verify the runtime release, preserve rollback, redact diagnostics, and test supported operating systems. Ship only after current support/terms, account eligibility, identity isolation, and live-user confirmation gates are satisfied.
 
 ## What we sell and what we must not promise
 
 Sell the organized career workspace, detailed skill interview workflow, reviewed resume history, and application tracking. Price our storage, licensed job data, infrastructure, support, and maintenance explicitly. Using the customer’s ChatGPT access does not make these costs disappear.
 
-Do not sell transferred OpenAI credits, unlimited AI, guaranteed access for every plan, autonomous applications, verified eligibility, or hiring outcomes. A plugin is a connection to Career Studio, not a general API credit conversion or proof that the standalone dashboard can consume a ChatGPT subscription. Keep the API-funded browser path, ChatGPT plugin path, and local companion research status distinguishable in product copy and contracts.
+Do not sell transferred OpenAI credits, unlimited AI, guaranteed access for every plan, autonomous applications, verified eligibility, or hiring outcomes. The local prototype uses the customer's official Codex-managed access on their device; it does not turn the hosted dashboard into a subscription API. A future plugin would be a scoped connection to Career Studio from ChatGPT. Keep the hosted API-funded path, future plugin, and implemented experimental local prototype distinguishable in product copy and contracts.

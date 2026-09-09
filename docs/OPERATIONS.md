@@ -2,9 +2,9 @@
 
 ## Scope and launch status
 
-This package is an API-backed pilot foundation. Customer subscription linking is not the launch architecture. The operator supplies AI access and must measure usage before deciding prices. Payment processing and subscription enforcement have not been implemented.
+The hosted deployment is an API-backed pilot foundation: the operator supplies AI access and must measure usage before deciding prices. A separate experimental local ChatGPT companion is implemented for the customer's own computer; keep `LOCAL_COMPANION` disabled on the hosted server. It is pinned to Codex 0.153.4, rejects production/proxy configuration, and has no API fallback. Payment processing and paid-plan enforcement have not been implemented.
 
-Start with [HANDOFF.md](../HANDOFF.md). Use [Security instructions](SECURITY.md) for the threat model, required hardening and release evidence, and [SaaS business and release plan](SAAS_BUSINESS_PLAN.md) for API setup, billing and customer delivery. The separate [customer-subscription specification](CUSTOMER_SUBSCRIPTION_DELIVERY.md) is future implementation work; these deployment commands do not install a ChatGPT plugin or companion.
+Start with [HANDOFF.md](../HANDOFF.md). Use [Security instructions](SECURITY.md) for the threat model, required hardening and release evidence, and [SaaS business and release plan](SAAS_BUSINESS_PLAN.md) for API setup, billing and customer delivery. [Local companion](LOCAL-COMPANION.md) covers the implemented experiment, memory-only authentication, temporary runtime metadata and cleanup, and live-pilot gates. [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md) specifies the future ChatGPT plugin. These hosted deployment commands install neither a plugin nor a supported desktop edition. Current written guides supersede the deck's older companion-research status.
 
 Use a single application process and a local persistent SQLite volume. Do not run multiple replicas against this file, place it on an unreliable network filesystem, or deploy it on a host that discards its writable disk. Process concurrency limits and authentication throttles are not coordinated across replicas. Before scaling, design a shared database, distributed quotas and throttles, and a migration and recovery strategy.
 

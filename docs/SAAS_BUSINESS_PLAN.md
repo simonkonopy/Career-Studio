@@ -6,7 +6,7 @@ Updated September 9, 2026. This is an implementation and validation plan for the
 
 The initial service runs on the business’s infrastructure with the business’s OpenAI API account. Customers buy access to Career Studio’s career workflow, saved records, document tools, and included AI allowance. They do not provide API credentials. Begin with a controlled unpaid pilot; choose prices and paid limits after measuring usefulness and costs.
 
-The customer-subscription edition is a separate integration specified in [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md). It does not replace the current API adapter merely by adding a sign-in button. Keep product subscriptions, ChatGPT access, and API charges separate in the code, customer copy, and accounting.
+The customer-subscription option is a separate **implemented experimental local companion**, described in [Local companion](LOCAL-COMPANION.md), plus a future plugin specified in [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md). The companion uses pinned Codex 0.153.4 on the customer's computer, has no API fallback, and still requires live subscription validation and production-support review. It must not run as a shared hosted subscription service. Keep product subscriptions, ChatGPT access, and API charges separate in the code, customer copy, and accounting. Current written guides supersede the deck's older companion-research status.
 
 ## API setup and validation
 
@@ -82,4 +82,4 @@ Billing is not currently implemented. Use a hosted payment flow so the applicati
 
 ## What remains the operator’s responsibility
 
-The operator owns domain and hosting costs, API funding, job-data permissions, payment operations, customer support, incident handling, backups, and retention. A future customer-owned ChatGPT connection changes where conversational AI runs; it does not eliminate these responsibilities. The release record must state which delivery modes work, which are planned, and which have actually passed hosted/customer validation.
+The operator owns domain and hosting costs, API funding for hosted mode, job-data permissions, payment operations, customer support, incident handling, backups, and retention. The experimental local companion changes where conversational AI runs and whose access is used; it does not eliminate product operating costs. The release record must distinguish implemented local startup from actual eligible-account inference, hosted validation, and the unbuilt plugin.

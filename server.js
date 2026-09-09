@@ -9,6 +9,7 @@ const Model=require('./lib/resume-model');
 const {createAI,applyProposals}=require('./lib/ai');
 const Documents=require('./lib/documents');
 const {createJobFeed,normalizeJob}=require('./lib/jobs');
+const {createCompanion,validateLocalConfiguration}=require('./lib/companion');
 
 function integer(value,fallback,min=1,max=100000){const n=Number(value??fallback);if(!Number.isInteger(n)||n<min||n>max)throw new Error('Invalid numeric server configuration.');return n;}
 function configuration(env=process.env){
@@ -20,12 +21,17 @@ function configuration(env=process.env){
   const trustedProxyIPs=(env.TRUSTED_PROXY_IPS||'').split(',').map(v=>v.trim()).filter(Boolean);
   if(trustedProxyIPs.some(ip=>!isIP(ip)))throw new Error('TRUSTED_PROXY_IPS must contain exact IP addresses, separated by commas.');
   if(production&&!trustedProxyIPs.length)throw new Error('Production requires explicit TRUSTED_PROXY_IPS for the HTTPS reverse proxy.');
-  return {port,production,origin:origin.origin,trustedProxyIPs,host:env.HOST||'127.0.0.1',dataDir:path.resolve(__dirname,env.DATA_DIR||'data'),inviteCode:env.PILOT_INVITE_CODE||'',dailyLimit:integer(env.AI_DAILY_LIMIT,40),globalLimit:integer(env.AI_GLOBAL_DAILY_LIMIT,400),concurrency:integer(env.AI_CONCURRENCY,3,1,20)};
+  const config={localCompanion:env.LOCAL_COMPANION==='1',codexBin:env.CODEX_BIN,port,production,origin:origin.origin,trustedProxyIPs,host:env.HOST||'127.0.0.1',dataDir:path.resolve(__dirname,env.DATA_DIR||'data'),inviteCode:env.PILOT_INVITE_CODE||'',dailyLimit:integer(env.AI_DAILY_LIMIT,40),globalLimit:integer(env.AI_GLOBAL_DAILY_LIMIT,400),concurrency:integer(env.AI_CONCURRENCY,3,1,20)};
+  if(config.localCompanion)validateLocalConfiguration(config);
+  return config;
 }
 function clientAddress(req,config){const peer=(req.socket.remoteAddress||'local').replace(/^::ffff:/,'');if((config.trustedProxyIPs||[]).includes(peer)){const forwarded=String(req.headers['x-forwarded-for']||'').trim();if(isIP(forwarded))return forwarded;}return peer;}
 function safeText(value,max=20000){return typeof value==='string'?value.replace(/\u0000/g,'').trim().slice(0,max):'';}
 function createApp(options={}){
   const config=options.config||configuration();
+  if(config.localCompanion||options.companion?.available)validateLocalConfiguration(config);
+  const companion=options.companion||createCompanion({enabled:config.localCompanion,binary:config.codexBin});
+  const localMode=Boolean(config.localCompanion||companion.available);
   const store=options.store||createStore(path.join(config.dataDir,'career.sqlite'),{dailyLimit:config.dailyLimit,globalLimit:config.globalLimit});
   const ai=options.ai||createAI({apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL||'gpt-5.6-terra'});
   const docs=options.documents||Documents;
@@ -36,7 +42,11 @@ function createApp(options={}){
   const allowedHost=new URL(config.origin).host;
   const tokenOf=req=>{const match=String(req.headers.cookie||'').match(/(?:^|;\s*)career_session=([A-Za-z0-9_-]{43})(?:;|$)/);return match?match[1]:'';};
   function setCookie(res,token,clear=false){res.setHeader('Set-Cookie',`${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${clear?0:604800}${config.production?'; Secure':''}`);}
-  function sessionPayload(session){return {user:session?{id:session.user_id,email:session.email}:null,csrfToken:session?.csrf||'',ai:{enabled:Boolean(ai.enabled)},signupAllowed:true,inviteRequired:Boolean(config.inviteCode)};}
+  function aiInfo(uid){return {enabled:localMode?Boolean(uid&&companion.status(uid).connected):Boolean(ai.enabled),provider:localMode?'chatgpt_local':ai.enabled?'openai_api':'none',consent:Boolean(uid&&store.user(uid)?.consent)};}
+  function companionInfo(uid){return uid?companion.status(uid):{available:localMode,status:localMode?'disconnected':'unavailable',connected:false};}
+  function statePayload(uid){return {...store.state(uid,aiInfo(uid).enabled),ai:aiInfo(uid),companion:companionInfo(uid)};}
+  function sessionPayload(session){return {user:session?{id:session.user_id,email:session.email}:null,csrfToken:session?.csrf||'',ai:aiInfo(session?.user_id),companion:companionInfo(session?.user_id),signupAllowed:true,inviteRequired:Boolean(config.inviteCode)};}
+  async function disconnectOwner(uid){active.get(uid)?.abort();if(store.user(uid))store.consent(uid,false);await companion.disconnect(uid);}
   function startSession(res,user){const token=Auth.secret(),csrf=Auth.secret();store.createSession(user.id,token,csrf);setCookie(res,token);return sessionPayload({user_id:user.id,email:user.email,csrf});}
   function send(res,status,payload){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(payload));}
   async function readJSON(req,maxBytes=2*1024*1024){
@@ -48,15 +58,16 @@ function createApp(options={}){
   async function withAuthLimit(req,fn){authLimit(clientAddress(req,config));if(authActive>=4)throw new StoreError(429,'Sign-in is busy. Please try again shortly.');authActive++;try{return await fn();}finally{authActive--;}}
   function requiredProfile(userId){const source=store.profile(userId);if(!source.profile.reviewed)throw new StoreError(400,'Review and confirm your career profile before creating a resume.','REVIEW_REQUIRED');if(!source.profile.basics.name)throw new StoreError(400,'Add your name before creating a resume.');return source;}
   async function runAI(userId,body,operation,work){
-    if(!ai.enabled)throw new StoreError(503,'The AI interviewer is not available yet. You can keep building and saving your profile.','AI_NOT_CONFIGURED');
+    const provider=localMode?createAI({structuredRequest:args=>companion.request(userId,args),timeoutMs:120000}):ai;
+    if(!aiInfo(userId).enabled)throw new StoreError(503,'The AI interviewer is not available yet. You can keep building and saving your profile.','AI_NOT_CONFIGURED');
     if(!store.user(userId)?.consent)throw new StoreError(403,'Confirm that your career information may be shared with the AI provider before continuing.','AI_CONSENT_REQUIRED');
     if(typeof body.requestId!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(body.requestId))throw new StoreError(400,'A valid request identifier is required.');
     if(active.has(userId)||activeCount>=config.concurrency)throw new StoreError(429,'AI is working on another request. Please try again shortly.','AI_BUSY');
-    const receipt=store.reserve(userId,body.requestId,operation,body);
+    const receipt=store.reserve(userId,body.requestId,operation,localMode?{...body,companionConnectionId:companion.status(userId).connectionId}:body);
     if(receipt.cached){if(receipt.failed)throw new StoreError(receipt.result.status||502,receipt.result.error,receipt.result.code);return receipt.result;}
     const controller=new AbortController();active.set(userId,controller);activeCount++;
     try{
-      const value=await work(controller.signal);
+      const value=await work(controller.signal,provider);
       if(controller.signal.aborted||!store.user(userId)||!store.user(userId).consent)throw new StoreError(409,'AI access was stopped. Please review your saved work.','AI_CANCELLED');
       const usageData=value.usage||{};
       store.finish(userId,body.requestId,value,usageData);
@@ -87,27 +98,30 @@ function createApp(options={}){
         const body=await readJSON(req,4096),email=Auth.email(body.email);
         if(config.inviteCode&&!Auth.equal(body.inviteCode||'',config.inviteCode))throw new StoreError(403,'Enter a valid pilot invitation code.','INVITE_REQUIRED');
         const encoded=await Auth.passwordHash(body.password),recoveryCode=Auth.recoveryCode();
-        const user=store.register(email,encoded,Auth.hash(recoveryCode));return send(res,201,{...startSession(res,user),recoveryCode});
+        const user=store.register(email,encoded,Auth.hash(recoveryCode));if(session){await disconnectOwner(session.user_id);store.logout(token);}return send(res,201,{...startSession(res,user),recoveryCode});
       });
       if(route==='/api/auth/login'&&method==='POST')return await withAuthLimit(req,async()=>{
         const body=await readJSON(req,4096),email=Auth.email(body.email),user=store.userByEmail(email);
         const valid=await Auth.verifyPassword(body.password,user?.password);if(!user||!valid)throw new StoreError(401,'Email or password is incorrect.','INVALID_LOGIN');
-        if(token)store.logout(token);return send(res,200,startSession(res,user));
+        if(session)await disconnectOwner(session.user_id);if(token)store.logout(token);return send(res,200,startSession(res,user));
       });
       if(route==='/api/auth/recover'&&method==='POST')return await withAuthLimit(req,async()=>{
         const body=await readJSON(req,4096),email=Auth.email(body.email),user=store.userByEmail(email);
         if(!user||typeof body.recoveryCode!=='string'||body.recoveryCode.length>100||!Auth.equal(Auth.hash(body.recoveryCode),user.recovery_hash))throw new StoreError(401,'Email or recovery code is incorrect.','INVALID_RECOVERY');
         const password=await Auth.passwordHash(body.password),recoveryCode=Auth.recoveryCode();
-        store.recover(user.id,password,Auth.hash(recoveryCode));return send(res,200,{...startSession(res,user),recoveryCode});
+        await disconnectOwner(user.id);if(session&&session.user_id!==user.id){await disconnectOwner(session.user_id);store.logout(token);}store.recover(user.id,password,Auth.hash(recoveryCode));return send(res,200,{...startSession(res,user),recoveryCode});
       });
       if(route.startsWith('/api/')){
         if(!session)throw new StoreError(401,'Sign in to continue.','UNAUTHENTICATED');
         if(['POST','PUT','PATCH','DELETE'].includes(method)&&!Auth.equal(req.headers['x-csrf-token']||'',session.csrf))throw new StoreError(403,'Your session changed. Refresh and try again.','CSRF_REQUIRED');
         const uid=session.user_id;
-        if(route==='/api/auth/logout'&&method==='POST'){store.logout(token);setCookie(res,'',true);return send(res,200,{ok:true});}
-        if(route==='/api/state'&&method==='GET')return send(res,200,store.state(uid,ai.enabled));
+        if(route==='/api/auth/logout'&&method==='POST'){await disconnectOwner(uid);store.logout(token);setCookie(res,'',true);return send(res,200,{ok:true});}
+        if(route==='/api/companion'&&method==='GET'){await companion.refresh(uid);return send(res,200,statePayload(uid));}
+        if(route==='/api/companion/connect'&&method==='POST'){await readJSON(req,2048);if(!['connecting','connected'].includes(companion.status(uid).status)){active.get(uid)?.abort();store.consent(uid,false);}await companion.connect(uid);return send(res,200,statePayload(uid));}
+        if(route==='/api/companion/disconnect'&&method==='POST'){await readJSON(req,2048);await disconnectOwner(uid);return send(res,200,statePayload(uid));}
+        if(route==='/api/state'&&method==='GET')return send(res,200,statePayload(uid));
         if(route==='/api/profile'&&method==='PUT'){const body=await readJSON(req);if(!body.profile||typeof body.profile!=='object'||Array.isArray(body.profile))throw new StoreError(400,'A career profile is required.');return send(res,200,store.saveProfile(uid,body.profile,body.revision));}
-        if(route==='/api/consent'&&method==='POST'){const body=await readJSON(req,2048);if(typeof body.enabled!=='boolean')throw new StoreError(400,'Choose whether to enable AI.');store.consent(uid,body.enabled);if(!body.enabled)active.get(uid)?.abort();return send(res,200,store.state(uid,ai.enabled));}
+        if(route==='/api/consent'&&method==='POST'){const body=await readJSON(req,2048);if(typeof body.enabled!=='boolean')throw new StoreError(400,'Choose whether to enable AI.');store.consent(uid,body.enabled);if(!body.enabled)active.get(uid)?.abort();return send(res,200,statePayload(uid));}
         if(route==='/api/interview/guided'&&method==='POST'){
           const body=await readJSON(req,32000);
           if(typeof body.message!=='string'||!body.message.trim()||body.message.length>6000||body.message.includes('\u0000'))throw new StoreError(400,'Write an answer or choose a skill, using 1 to 6,000 characters.');
@@ -115,33 +129,33 @@ function createApp(options={}){
           if(body.topic!==undefined&&(typeof body.topic!=='string'||body.topic.length>200||/[\u0000-\u001f\u007f]/.test(body.topic)))throw new StoreError(400,'Choose a skill name of 200 characters or fewer.');
           guidedLimit(uid);
           store.guidedInterview(uid,body.requestId,{message:body.message.trim(),topic:body.topic?.trim()||''});
-          return send(res,200,store.state(uid,ai.enabled));
+          return send(res,200,statePayload(uid));
         }
         if(route==='/api/interview'&&method==='POST'){
           const body=await readJSON(req,16000),message=safeText(body.message,6000);if(!message)throw new StoreError(400,'Write an answer or tell us what you would like to explore.');if(body.message.length>6000)throw new StoreError(400,'Keep each answer under 6,000 characters.');
-          await runAI(uid,body,'interview',async signal=>{
+          await runAI(uid,body,'interview',async (signal,provider)=>{
             const source=store.profile(uid);store.addMessage(uid,'user',message);
-            const result=await ai.interview({profile:source.profile,messages:store.messages(uid),signal});
+            const result=await provider.interview({profile:source.profile,messages:store.messages(uid),signal});
             sourceStillCurrent(uid,source.revision,signal);
             store.transaction(()=>{store.addMessage(uid,'assistant',result.message,result.questions);store.addProposals(uid,result.proposals,source.revision);});
             return {ok:true,usage:result.usage};
-          });return send(res,200,store.state(uid,ai.enabled));
+          });return send(res,200,statePayload(uid));
         }
         const proposal=route.match(/^\/api\/proposals\/([A-Za-z0-9-]+)\/(accept|reject)$/);
-        if(proposal&&method==='POST'){store.decideProposal(uid,proposal[1],proposal[2]==='accept',applyProposals);return send(res,200,store.state(uid,ai.enabled));}
+        if(proposal&&method==='POST'){store.decideProposal(uid,proposal[1],proposal[2]==='accept',applyProposals);return send(res,200,statePayload(uid));}
         if(route==='/api/resume/extract'&&method==='POST'){const body=await readJSON(req,12*1024*1024);return send(res,200,await docs.extractResume(body));}
         if(route==='/api/jobs/assess'&&method==='POST'){
           const body=await readJSON(req,150000),job=normalizeJob(body.job);
           requiredProfile(uid);
-          const result=await runAI(uid,body,'assess',async signal=>{const source=store.profile(uid);const result=await ai.assess({profile:source.profile,job,signal});sourceStillCurrent(uid,source.revision,signal);return result;});
+          const result=await runAI(uid,body,'assess',async (signal,provider)=>{const source=store.profile(uid);const result=await provider.assess({profile:source.profile,job,signal});sourceStillCurrent(uid,source.revision,signal);return result;});
           return send(res,200,{assessment:result,usage:store.usage(uid)});
         }
         if(route==='/api/resumes'&&method==='POST'){
           const body=await readJSON(req,150000),title=safeText(body.title,160)||'My resume';
           if(!body.job){const source=requiredProfile(uid);return send(res,201,{resume:store.addResume(uid,{title,text:Model.resumeText(source.profile),profile:source.profile})});}
           const job=normalizeJob(body.job);
-          const result=await runAI(uid,body,'tailor',async signal=>{
-            const source=requiredProfile(uid),draft=await ai.tailor({profile:source.profile,job,signal});sourceStillCurrent(uid,source.revision,signal);
+          const result=await runAI(uid,body,'tailor',async (signal,provider)=>{
+            const source=requiredProfile(uid),draft=await provider.tailor({profile:source.profile,job,signal});sourceStillCurrent(uid,source.revision,signal);
             const tailored=Model.normalizeProfile(source.profile);tailored.basics.summary=draft.summary;
             for(const role of tailored.experience){const result=draft.experience.find(row=>row.id===role.id);if(result){role.responsibilities='';role.achievements=result.bullets.map(b=>b.text).join('\n');}}
             // Select relevant skills without changing any customer-assessed task levels.
@@ -164,8 +178,8 @@ function createApp(options={}){
           if(body.resumeId!==undefined){if(body.resumeId!==null&&typeof body.resumeId!=='string')throw new StoreError(400,'Choose a saved resume.');changes.resumeId=body.resumeId||null;}
           return send(res,200,{application:store.editApplication(uid,application[1],changes)});
         }
-        if(route==='/api/export'&&method==='GET'){res.setHeader('Content-Disposition','attachment; filename="career-studio-backup.json"');return send(res,200,{format:'career-studio-export-v1',exportedAt:new Date().toISOString(),...store.state(uid,ai.enabled)});}
-        if(route==='/api/account'&&method==='DELETE'){const body=await readJSON(req,4096);return await withAuthLimit(req,async()=>{if(!await Auth.verifyPassword(body.password,store.user(uid).password))throw new StoreError(403,'Password is incorrect.');active.get(uid)?.abort();store.deleteAccount(uid);setCookie(res,'',true);return send(res,200,{ok:true});});}
+        if(route==='/api/export'&&method==='GET'){res.setHeader('Content-Disposition','attachment; filename="career-studio-backup.json"');return send(res,200,{format:'career-studio-export-v1',exportedAt:new Date().toISOString(),...store.state(uid,aiInfo(uid).enabled)});}
+        if(route==='/api/account'&&method==='DELETE'){const body=await readJSON(req,4096);return await withAuthLimit(req,async()=>{if(!await Auth.verifyPassword(body.password,store.user(uid).password))throw new StoreError(403,'Password is incorrect.');await disconnectOwner(uid);store.deleteAccount(uid);setCookie(res,'',true);return send(res,200,{ok:true});});}
         throw new StoreError(404,'This action was not found.');
       }
       if(method==='GET'||method==='HEAD'){
@@ -177,7 +191,7 @@ function createApp(options={}){
     }catch(error){if(!res.headersSent)send(res,error.status||error.statusCode||500,{error:publicMessage(error),code:error.code||'REQUEST_FAILED'});else res.end();}
   };
   const server=http.createServer(handler);server.requestTimeout=30000;server.headersTimeout=15000;server.maxHeadersCount=60;
-  return {server,store,config,close:async()=>{for(const controller of active.values())controller.abort();await new Promise(resolve=>server.close(resolve));store.close();}};
+  return {server,store,config,close:async()=>{for(const controller of active.values())controller.abort();await companion.close();await new Promise(resolve=>server.close(resolve));store.close();}};
 }
-if(require.main===module){const app=createApp();app.server.listen(app.config.port,app.config.host,()=>console.log(`Career Studio: ${app.config.origin}\nAI: ${process.env.OPENAI_API_KEY?'configured':'awaiting server setup'}\nData: private persistent storage`));}
+if(require.main===module){const app=createApp();for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>app.close().then(()=>process.exit(0)));app.server.listen(app.config.port,app.config.host,()=>console.log(`Career Studio: ${app.config.origin}\nAI: ${app.config.localCompanion?'local ChatGPT companion (connect in Your account)':process.env.OPENAI_API_KEY?'configured':'awaiting server setup'}\nData: private persistent storage`));}
 module.exports={createApp,configuration,clientAddress};

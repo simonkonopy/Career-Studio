@@ -410,3 +410,154 @@ test('AI allowance exhaustion leaves guided answers usable without more provider
   assert.equal(saved.interview.proposals.length, 1);
   assert.match(await page.locator('#messages').innerText(), /I match invoices with purchase orders/);
 });
+
+// Exercise the browser's connection contract without starting a real ChatGPT login.
+async function mockCompanion(page, base, initial = {}) {
+  const mock = { current: { available: true, status: 'disconnected', connected: false, ...initial }, calls: [], consent: null, refresh: null, authUrl: 'https://auth.openai.com/authorize?client_id=synthetic-preview' };
+  const withConnection = value => ({ ...value, companion: { ...mock.current }, ai: { ...value.ai, enabled: mock.current.connected, provider: mock.current.connected ? 'chatgpt_local' : 'none', ...(mock.consent === null ? {} : { consent: mock.consent }) } });
+  await page.route(/\/api\/(state|consent|interview(?:\/guided)?|companion(?:\/(?:connect|disconnect))?)$/, async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.startsWith('/api/companion')) {
+      mock.calls.push({ path: pathname, method: route.request().method() });
+      if (pathname.endsWith('/connect')) mock.current = { available: true, status: 'connecting', connected: false, authUrl: mock.authUrl };
+      if (pathname.endsWith('/disconnect')) { mock.current = { available: true, status: 'disconnected', connected: false }; mock.consent = false; }
+      if (pathname === '/api/companion' && mock.refresh) await mock.refresh();
+      const response = await page.request.get(base + '/api/state');
+      return route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(withConnection(await response.json())) });
+    }
+    if (pathname === '/api/consent') mock.consent = route.request().postDataJSON().enabled;
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ response, json: response.ok() ? withConnection(value) : value });
+  });
+  return mock;
+}
+const connectedCompanion = (overrides = {}) => ({ available: true, status: 'connected', connected: true, connectionId: 'synthetic-connection-one', email: 'own-chatgpt@example.test', plan: 'Plus', model: 'test-model', limits: { primary: { usedPercent: 25, resetsAt: 2000000000, windowDurationMins: 300 }, secondary: { usedPercent: 40, resetsAt: 2000500000, windowDurationMins: 10080 } }, ...overrides });
+
+test('local ChatGPT connection uses a real sign-in link, separate consent, and preserves guided drafts on mobile', async t => {
+  const { page, base, aiCalls } = await fixture(t, { enabled: true, width: 390 });
+  const mock = await mockCompanion(page, base); await signUp(page); await go(page, 'Interview');
+  const draft = 'I use AI to summarize supplier notes, then verify names against the originals.';
+  await page.getByLabel('Your answer', { exact: true }).fill(draft);
+  assert.equal(await page.getByRole('button', { name: 'Save answer & continue', exact: true }).isEnabled(), true);
+  await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Your ChatGPT access', exact: true });
+  assert.match(await card.innerText(), /Experimental local preview/);
+  await card.getByRole('button', { name: 'Connect ChatGPT', exact: true }).click();
+  const signIn = card.getByRole('link', { name: /Continue sign-in/ }); await signIn.waitFor();
+  assert.equal(await signIn.getAttribute('href'), mock.authUrl);
+  assert.equal(await signIn.getAttribute('target'), '_blank');
+  assert.equal(await signIn.getAttribute('rel'), 'noopener noreferrer');
+  mock.current = connectedCompanion();
+  await card.getByRole('button', { name: 'Check connection', exact: true }).click();
+  await card.getByText('ChatGPT connected', { exact: true }).waitFor();
+  assert.match(await card.innerText(), /own-chatgpt@example.test.*Plus/s);
+  assert.match(await card.innerText(), /5-hour window: 75% remaining/);
+  assert.match(await card.innerText(), /7-day window: 60% remaining/);
+  assert.match(await card.innerText(), /limits are separate.*Studio requests/s);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  if (process.env.CAREER_SCREENSHOT_DIR) { fs.mkdirSync(process.env.CAREER_SCREENSHOT_DIR, { recursive: true }); await card.screenshot({ path: path.join(process.env.CAREER_SCREENSHOT_DIR, 'career-studio-chatgpt-mobile.png') }); }
+  await go(page, 'Interview');
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), draft);
+  assert.equal(await page.getByRole('button', { name: 'Save answer & continue', exact: true }).isEnabled(), true);
+  assert.match(await page.locator('.notice').innerText(), /saved interview history.*OpenAI through your connected ChatGPT access/s);
+  await page.getByRole('button', { name: 'Enable AI assistance', exact: true }).click();
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), draft);
+  await page.getByRole('button', { name: 'Send →', exact: true }).waitFor();
+  assert.match(await page.locator('#interview-mode-help').innerText(), /Using your ChatGPT access.*Studio requests.*limits apply separately/s);
+  await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  await card.getByRole('button', { name: 'Disconnect ChatGPT', exact: true }).click();
+  await card.getByText('ChatGPT is not connected', { exact: true }).waitFor();
+  assert.doesNotMatch(await card.innerText(), /own-chatgpt@example.test/);
+  await go(page, 'Interview');
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), draft);
+  await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#interview-message')?.value === '');
+  assert.deepEqual(aiCalls, []);
+  assert.deepEqual(mock.calls.map(call => call.path), ['/api/companion/connect', '/api/companion', '/api/companion/disconnect']);
+});
+
+test('hosted and demo accounts do not advertise local connection, and unsafe sign-in URLs stay unlinked', async t => {
+  const { page, base } = await fixture(t);
+  const mock = await mockCompanion(page, base, { available: false, status: 'unavailable' });
+  await signUp(page); await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  assert.equal(await page.getByRole('region', { name: 'Your ChatGPT access', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).count(), 0);
+  mock.current = { available: true, status: 'connecting', connected: false, authUrl: 'https://auth.openai.com.attacker.example/steal' };
+  await page.reload(); await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Your ChatGPT access', exact: true });
+  assert.equal(await card.getByRole('link', { name: /Continue sign-in/ }).count(), 0);
+  assert.match(await card.innerText(), /secure sign-in link is not available/);
+  for (const authUrl of ['javascript:alert(1)', 'http://auth.openai.com/login', 'https://someone@chatgpt.com/login', 'https://chatgpt.com:8443/login']) {
+    mock.current.authUrl = authUrl;
+    await card.getByRole('button', { name: 'Check connection', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('[data-action="companion-refresh"]')?.disabled);
+    assert.equal(await card.getByRole('link', { name: /Continue sign-in/ }).count(), 0);
+  }
+  await page.goto(base + '/demo'); await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  assert.equal(await page.getByRole('region', { name: 'Your ChatGPT access', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).count(), 0);
+});
+
+test('connection checks stop on navigation, after ten minutes, and cannot reveal a previous account', async t => {
+  const { page, base } = await fixture(t); const mock = await mockCompanion(page, base);
+  await signUp(page); await page.clock.install();
+  await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).click();
+  await page.getByRole('link', { name: /Continue sign-in/ }).waitFor();
+  let pendingRefresh;
+  mock.refresh = () => new Promise(resolve => { pendingRefresh = resolve; });
+  await page.clock.runFor(2600);
+  await page.waitForFunction(() => document.querySelector('[data-action="companion-connect"]') === null);
+  assert.equal(typeof pendingRefresh, 'function');
+  await go(page, 'Interview');
+  await page.getByLabel('Your answer', { exact: true }).fill('My unsent accounting example.');
+  mock.current = connectedCompanion({ email: 'stale-account@example.test' }); pendingRefresh();
+  await page.waitForTimeout(50);
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), 'My unsent accounting example.');
+  assert.equal(await page.getByRole('button', { name: 'Save answer & continue', exact: true }).count(), 1);
+  const count = mock.calls.length; await page.clock.runFor(10000); assert.equal(mock.calls.length, count);
+  mock.refresh = null; mock.current = { available: true, connected: false, status: 'connecting', authUrl: mock.authUrl };
+  await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  await page.clock.fastForward(600001);
+  await page.waitForTimeout(50);
+  const timedOutCount = mock.calls.length; await page.clock.runFor(10000); assert.equal(mock.calls.length, timedOutCount);
+  await page.getByRole('button', { name: 'Check connection', exact: true }).click();
+  await page.getByRole('link', { name: /Continue sign-in/ }).waitFor();
+  mock.refresh = () => new Promise(resolve => { pendingRefresh = resolve; });
+  await page.clock.runFor(2600);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByRole('heading', { name: 'Welcome to your studio' }).waitFor();
+  mock.current = connectedCompanion({ email: 'stale-account@example.test' }); pendingRefresh();
+  await page.waitForTimeout(50);
+  assert.doesNotMatch(await page.locator('body').innerText(), /stale-account@example.test|ChatGPT connected/);
+  const signedOutCount = mock.calls.length; await page.clock.runFor(10000); assert.equal(mock.calls.length, signedOutCount);
+});
+
+test('known ChatGPT quota exhaustion keeps guided answers available and retries use a new connection identity', async t => {
+  const { page, base, aiCalls } = await fixture(t, { enabled: true });
+  const mock = await mockCompanion(page, base, connectedCompanion({ limits: { primary: { usedPercent: 100, resetsAt: 2000000000, windowDurationMins: 300 } } }));
+  await signUp(page); await go(page, 'Interview'); await page.getByRole('button', { name: 'Enable AI assistance', exact: true }).click();
+  await page.locator('.notice').filter({ hasText: 'A ChatGPT usage window is used up.' }).waitFor();
+  await page.getByLabel('Your answer', { exact: true }).fill('I check accounting totals without help.');
+  await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#interview-message')?.value === ''); assert.deepEqual(aiCalls, []);
+  mock.current = connectedCompanion();
+  await page.getByRole('button', { name: 'Your account', exact: true }).click(); await page.getByRole('button', { name: 'Refresh connection', exact: true }).click();
+  await go(page, 'Interview');
+  const requests = [];
+  await page.route('**/api/interview', async route => { requests.push(route.request().postDataJSON()); await route.abort('failed'); });
+  await page.getByLabel('Your answer', { exact: true }).fill('An uncertain AI answer worth retrying.');
+  await page.getByRole('button', { name: 'Send →', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'We could not reach the studio' }).waitFor();
+  await page.getByRole('button', { name: 'Your account', exact: true }).click();
+  await page.getByRole('button', { name: 'Disconnect ChatGPT', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).click();
+  await page.getByRole('link', { name: /Continue sign-in/ }).waitFor();
+  mock.current = connectedCompanion({ connectionId: 'synthetic-connection-two', email: 'other-owned-chatgpt@example.test' });
+  await page.getByRole('button', { name: 'Check connection', exact: true }).click();
+  await go(page, 'Interview'); await page.getByRole('button', { name: 'Enable AI assistance', exact: true }).click();
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), 'An uncertain AI answer worth retrying.');
+  await page.getByRole('button', { name: 'Send →', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'We could not reach the studio' }).waitFor();
+  assert.equal(requests.length, 2); assert.notEqual(requests[0].requestId, requests[1].requestId);
+});

@@ -2,9 +2,9 @@
 
 **Start here when this package becomes the GitHub repository.** Updated September 9, 2026. Package version 0.1.0.
 
-This repository contains the working program and the instructions for turning it into a commercial SaaS product. It also specifies a future delivery option for customers who want to use their own ChatGPT access. The Fable presentation theme, current dashboard styling, and interviews for any skill are included.
+This repository contains the working program and the instructions for turning it into a commercial SaaS product. It also includes an experimental local companion for customers who want to use their own eligible ChatGPT access, plus a future ChatGPT-plugin specification. The Fable presentation theme, current dashboard styling, and interviews for any skill are included.
 
-**Current release status:** a working pilot foundation. The source includes an OpenAI API adapter, accounts, guided interviews, saved profiles, resume export, job assessments, an application tracker, and a simulated demo. Billing, a ChatGPT plugin, a desktop subscription companion, and a production deployment are not implemented. The latest local application suite passed 92 tests on September 9. Those tests use simulated providers and do not establish production security or live AI quality.
+**Current release status:** a working pilot foundation. The source includes an OpenAI API adapter, an experimental local Codex companion, accounts, guided interviews, saved profiles, resume export, job assessments, an application tracker, and a simulated demo. Billing, a ChatGPT plugin, a signed desktop installer, and a production deployment are not implemented. The September 9 suite passes **121 checks: 101 unit/server checks and 20 browser journeys**. Provider checks use simulations; isolated real-runtime startup has been checked without login or inference. Live API and subscription behavior still need separate validation. These checks do not establish production security or live AI quality.
 
 ## 1. What we are building and selling
 
@@ -24,13 +24,13 @@ Sell the reviewed career workspace and useful search workflow. Do not promise a 
 | --- | --- | --- | --- |
 | **Hosted SaaS: launch path** | Career Studio website, private account, resume builder, job reviews, tracker | The business’s server-side OpenAI API account | Program implemented; hosting, live validation, security gates, and billing remain. |
 | **ChatGPT plugin: customer-access target** | A Career Studio plugin used inside ChatGPT, connected to their Career Studio account | The customer uses ChatGPT in their own account; backend tools store and retrieve their Career Studio data | Implementation instructions included; MCP server, OAuth connection, plugin package, review, and end-to-end validation still need building. |
-| **Desktop companion: optional research path** | A locally installed Career Studio interface using an official Codex-managed sign-in | Customer’s eligible ChatGPT/Codex access | Not built; confirm production support and commercial suitability before committing to this release path. |
+| **Local companion: experimental prototype** | Career Studio running on the customer's own computer, with official Codex-managed browser sign-in | Customer’s eligible ChatGPT/Codex access; never an API fallback | Adapter and dashboard connection flow implemented, pinned to Codex 0.153.4; no-login startup checked. Live account pilot, distribution, and production-support gates remain. |
 
 OpenAI documents subscription sign-in separately from Platform API usage. A customer’s ChatGPT subscription is not a credential to substitute into this program’s Responses API requests. [Official authentication guidance](https://learn.chatgpt.com/docs/auth).
 
-The recommendation is to ship and validate the hosted API-backed product first, then implement the ChatGPT plugin if customers want to work inside ChatGPT. Keep a native desktop harness as a separate decision. The official App Server documentation describes managed ChatGPT login, but also warns that the app-server command and WebSocket transport are experimental and unsupported for production workloads. The existence of a login flow alone is not a production release approval. [Official App Server documentation](https://learn.chatgpt.com/docs/app-server).
+The hosted API-backed product remains the SaaS deployment path. The local companion supplies a separate experimental preview in our interface; a plugin would serve customers inside ChatGPT. Do not run a shared subscription runtime on the SaaS server. The official App Server documentation describes managed ChatGPT login, but also warns that the app-server command and WebSocket transport are experimental and unsupported for production workloads. The existence of a login flow alone is not a production release approval. [Official App Server documentation](https://learn.chatgpt.com/docs/app-server).
 
-Detailed implementation, customer onboarding, billing boundaries, and acceptance checks are in [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md). This is a build specification, not a claim that the connection already works.
+Use [Local companion](docs/LOCAL-COMPANION.md) for the implemented prototype, configuration, enforced restrictions, and live-pilot gates. [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md) separately specifies the unbuilt ChatGPT plugin, customer onboarding, billing boundaries, and acceptance checks.
 
 ## 3. What is in this package
 
@@ -46,13 +46,13 @@ Detailed implementation, customer onboarding, billing boundaries, and acceptance
 | [SaaS business and release plan](docs/SAAS_BUSINESS_PLAN.md) | API setup, product packaging, cost controls, billing work, customer delivery, and commercial release gates. |
 | [Security instructions](docs/SECURITY.md) | Current controls, threat boundaries, hardening work, verification, and incident response. |
 | [Operations](docs/OPERATIONS.md) | Environment setup, container deployment, HTTPS, backup/restore, data retention. |
-| [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md) | ChatGPT plugin implementation and optional local companion research. |
+| [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md), [Local companion](docs/LOCAL-COMPANION.md) | Future ChatGPT plugin specification and implemented experimental local runtime, kept separate from hosted API funding. |
 | [Design handoff](docs/DESIGN_HANDOFF.md), `docs/design/` | Fable’s theme, dashboard design settings, and reusable artwork. |
-| [Pitch deck: PowerPoint](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx), [PDF](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) | Editable 29-slide visual overview. The current written engineering and security guides also document the newer guided-interview behavior. |
+| [Pitch deck: PowerPoint](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx), [PDF](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) | Editable 29-slide visual overview in the Fable theme. Current written guides supersede its older guided-interview and companion-research status. |
 
 ## 4. Create the repository and run the program
 
-Unzip the source package into a fresh directory and make **its contents** the root of a new private GitHub repository. Do not import the parent personal job-search repository or its history. Inspect the file list before the first commit. Keep `.env`, credentials, live databases, backups, customer documents, personal research, `node_modules`, and browser traces out of Git.
+Unzip the source package into a fresh directory and make **its contents** the root of the dedicated product GitHub repository. Do not import the parent personal job-search repository or its history. Inspect the file list before committing. Keep `.env`, credentials, live databases, backups, customer documents, personal research, `node_modules`, companion runtime directories, and browser traces out of Git.
 
 Use Node.js 24 or newer. From the new repository root:
 
@@ -69,6 +69,8 @@ npm start
 Open `http://127.0.0.1:4174/demo` for the fictional preview, or `/` for the actual account flow. The demo requires no account or API key and resets its edits on reload. Account/profile/resume/tracker functionality and the real account’s guided interview work without an AI key. The saved guided interview is distinct from the disposable scripted demo. Browser tests use temporary accounts and local services.
 
 To enable real AI, privately configure `OPENAI_API_KEY` and a model available to the business’s API project as `OPENAI_MODEL`, then restart. Never distribute the business key to customers or put it into JavaScript, GitHub, a Docker layer, a screenshot, or a support ticket. Do not assume a sample model string proves availability.
+
+For the separate local subscription preview, follow [Local companion](docs/LOCAL-COMPANION.md), run `npm run start:companion` with `LOCAL_COMPANION=1`, and connect from **Your account**. This requires the pinned official runtime, a local account, an eligible ChatGPT sign-in, and separate consent before career data is sent. Production mode, external binding, and proxy configuration are rejected. A failed or exhausted subscription does not use the business API key. Authentication lives in the child process; runtime metadata is temporary disk data cleaned up when it exits.
 
 Build the container and run the GitHub checks in the receiving environment. Keep their results with the release record. See [Operations](docs/OPERATIONS.md) for the actual deployment commands; local preview settings are not production settings.
 
@@ -103,7 +105,7 @@ The included controls are a starting point. The engineer must complete and recor
 - Operate recovery. Rehearse backup restoration, session revocation, account deletion reconciliation, a bad release rollback, and incident communication with assigned owners.
 - Review the release supply chain. Scan dependencies and container contents, protect GitHub branches and deployment credentials, and distribute signed/verifiable artifacts where applicable. Resolve critical findings before release.
 
-For customer-subscription integrations, add a separate threat model: OAuth/token scopes and revocation, customer identity mapping, MCP request isolation, prompt injection through external content, and explicit customer approval for writes. A local companion must also isolate its runtime, credential store, IPC, filesystem access, and update mechanism.
+For the experimental local companion, preserve runtime isolation, in-memory authentication, private IPC, capability removal, owner binding, cleanup, and no fallback as documented in [Local companion](docs/LOCAL-COMPANION.md). A future plugin needs separate OAuth/token scopes and revocation, customer identity mapping, MCP isolation, prompt-injection controls, and explicit customer approval for writes. Its threat model is not inherited automatically from the existing browser product.
 
 ## 7. Turn the pilot into a business
 
@@ -121,7 +123,7 @@ Hosting, job data, payment processing, storage, and support remain business cost
 
 For the SaaS release, provide a stable HTTPS URL, account onboarding, an accurate explanation of AI/data processing, recovery instructions, a first-resume walkthrough, document downloads, export/deletion controls, visible usage limits, and a reachable support channel. Paid customers also need receipts, billing management, cancellation, and clear service terms. They do not install Node or receive a source ZIP to use the hosted service.
 
-For the future ChatGPT integration, provide the approved install/connection entry, supported-account requirements, Career Studio account linking, a consent screen, a guided first skill interview, review controls, and disconnect/revoke instructions. For a future local companion, provide a signed installer, supported OS/runtime requirements, official sign-in, local-data controls, secure updates, and uninstall instructions. Test each of these flows before advertising that edition.
+For the future ChatGPT plugin, provide the approved install/connection entry, supported-account requirements, Career Studio account linking, consent, a first skill interview, review controls, and disconnect/revoke instructions. The local companion prototype already has connection controls; before distribution, provide a signed installer, supported OS/runtime requirements, secure updates, and uninstall instructions, then complete its live sign-in/inference and lifecycle pilot. Do not describe the prototype as a production desktop release.
 
 ## 9. Release evidence to leave for the next engineer
 

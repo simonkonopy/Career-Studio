@@ -4,7 +4,7 @@
 
 Use this guide alongside [README](../README.md) and [Operations](OPERATIONS.md). Product behavior below is based on the current package. Audience, recruiting, pricing, and targets are **proposed experiments**, not evidence of traction or established market facts.
 
-The full repository entry point is [HANDOFF.md](../HANDOFF.md). See [SaaS business and release plan](SAAS_BUSINESS_PLAN.md) for commercial implementation and [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md) for the proposed ChatGPT plugin and customer connection flow. Describe that edition as planned until it passes its release checks.
+The full repository entry point is [HANDOFF.md](../HANDOFF.md). See [SaaS business and release plan](SAAS_BUSINESS_PLAN.md) for commercial implementation, [Local companion](LOCAL-COMPANION.md) for the implemented experimental customer-subscription prototype, and [Customer subscription delivery](CUSTOMER_SUBSCRIPTION_DELIVERY.md) for the future ChatGPT plugin. Distinguish a working local startup from a completed live subscription pilot. These written guides supersede the deck's older companion-research and guided-interview status while preserving its Fable presentation theme.
 
 ## The promise
 
@@ -84,7 +84,7 @@ Review friction after the first three participants. If the interview is exhausti
 
 ## Pricing and economics: questions to test
 
-**Chosen architecture:** the operator pays for server-side AI and provides customer allowances. Customers do not need a personal API key or ChatGPT subscription. Personal ChatGPT subscription linking is deferred and must not be promised as an upcoming date or available entitlement.
+**Hosted architecture:** the operator pays for server-side AI and provides customer allowances; customers do not need a personal API key or ChatGPT subscription. The separate local companion is an experimental prototype using the customer's eligible ChatGPT access, pinned to Codex 0.153.4. It has no API fallback and still needs a live customer pilot and production-support gates. Do not promise it as a production-ready entitlement or give an unsupported release date.
 
 Test packaging after measuring pilot usage:
 
@@ -121,7 +121,7 @@ Define numerical continuation criteria before a cohort starts, then report count
 | Prospect asks | Answer |
 | --- | --- |
 | “Why not just use ChatGPT?” | “You can use ChatGPT directly. Career Studio puts a reviewed career profile, resume versions, job reviews, and application history in one workflow. We are testing whether that structure saves enough effort to be worth paying for.” |
-| “Can I use my ChatGPT subscription?” | “The current product includes AI through the service. You do not need a subscription or API key. A future Career Studio plugin would let you work inside ChatGPT using your own supported account, but that connection has not been built or released.” |
+| “Can I use my ChatGPT subscription?” | “We have built an experimental local connection that uses official Codex sign-in on your own computer. Its startup has been checked, but live eligible-account use still needs a pilot; it is not the hosted SaaS edition. The hosted product uses our API account. A plugin inside ChatGPT is a separate future project.” |
 | “Will it get me a job?” | “It helps you describe your experience, examine roles, and organize the search. Employers make hiring decisions; we do not guarantee interviews or offers.” |
 | “Does it apply everywhere for me?” | “You choose and submit applications yourself. The tracker records your progress and resume version.” |
 | “Are these real openings?” | “The demo openings are fictional. The authenticated product can assess public remote listings or postings you supply; availability and employer eligibility still need checking.” |
