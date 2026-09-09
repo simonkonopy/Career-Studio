@@ -4,13 +4,15 @@
 
 This repository contains the working program and the instructions for turning it into a commercial SaaS product. It also specifies a future delivery option for customers who want to use their own ChatGPT access. The Fable presentation theme, current dashboard styling, and interviews for any skill are included.
 
-**Current release status:** a working pilot foundation. The source includes an OpenAI API adapter, accounts, saved profiles, resume export, job assessments, an application tracker, and a simulated demo. Billing, a ChatGPT plugin, a desktop subscription companion, and a production deployment are not implemented. The latest local application suite passed 83 tests on September 9. Those tests use simulated providers and do not establish production security or live AI quality.
+**Current release status:** a working pilot foundation. The source includes an OpenAI API adapter, accounts, guided interviews, saved profiles, resume export, job assessments, an application tracker, and a simulated demo. Billing, a ChatGPT plugin, a desktop subscription companion, and a production deployment are not implemented. The latest local application suite passed 92 tests on September 9. Those tests use simulated providers and do not establish production security or live AI quality.
 
 ## 1. What we are building and selling
 
 Career Studio helps a person explain their actual experience, create a resume they can support in an interview, evaluate job requirements, and organize applications.
 
 Customers start from a blank profile or upload a PDF, DOCX, or TXT resume. The interviewer goes deeper on **every skill**, including AI, accounting, programming, Excel, trades, and unfamiliar custom skills. It asks about tasks, tools, personal contribution, help, recent use, and real examples. Naming a skill does not imply proficiency. Preserve independent work, assisted work, and learning as separate levels.
+
+Real account holders can choose any skill, answer prepared follow-up questions, and save the interview without an API key, AI consent, or remaining AI allowance. This guided mode uses no external AI and creates no automatic skill levels, profile claims, or proposals. Saved answers and question progress survive reloads; repeating the same recorded request does not duplicate the answer. Add confirmed details manually in Your story. Enabling optional AI later shares saved interview history as well as new answers under the consent described on screen.
 
 The customer reviews proposed facts before they enter the profile, reviews the profile before generating a resume, and approves a document version before using it. Job assessments explain supported experience, gaps, and unknowns. Customers submit applications themselves.
 
@@ -46,7 +48,7 @@ Detailed implementation, customer onboarding, billing boundaries, and acceptance
 | [Operations](docs/OPERATIONS.md) | Environment setup, container deployment, HTTPS, backup/restore, data retention. |
 | [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md) | ChatGPT plugin implementation and optional local companion research. |
 | [Design handoff](docs/DESIGN_HANDOFF.md), `docs/design/` | Fable’s theme, dashboard design settings, and reusable artwork. |
-| [Pitch deck: PowerPoint](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx), [PDF](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) | Editable 29-slide product, engineering, and sales presentation. |
+| [Pitch deck: PowerPoint](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx), [PDF](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) | Editable 29-slide visual overview. The current written engineering and security guides also document the newer guided-interview behavior. |
 
 ## 4. Create the repository and run the program
 
@@ -64,7 +66,7 @@ npm run test:browser
 npm start
 ```
 
-Open `http://127.0.0.1:4174/demo` for the fictional preview, or `/` for the actual account flow. The demo requires no account or API key and resets its edits on reload. Manual account/profile/resume/tracker functionality works without an AI key. Browser tests use temporary accounts and local services.
+Open `http://127.0.0.1:4174/demo` for the fictional preview, or `/` for the actual account flow. The demo requires no account or API key and resets its edits on reload. Account/profile/resume/tracker functionality and the real account’s guided interview work without an AI key. The saved guided interview is distinct from the disposable scripted demo. Browser tests use temporary accounts and local services.
 
 To enable real AI, privately configure `OPENAI_API_KEY` and a model available to the business’s API project as `OPENAI_MODEL`, then restart. Never distribute the business key to customers or put it into JavaScript, GitHub, a Docker layer, a screenshot, or a support ticket. Do not assume a sample model string proves availability.
 
@@ -82,6 +84,8 @@ flowchart LR
   R -->|Approved facts only| S
   S -->|Fixed public source request| J[Public job feed]
 ```
+
+Guided interview requests stay within the server and private database; they bypass the OpenAI branch and AI allowance counters. They retain authentication, CSRF checks, request bounds, and a separate account-level rate limit.
 
 The server controls ownership and validates every write. AI output cannot grant permissions, run commands, choose an account owner, submit an application, or bypass customer review. Preserve source evidence, task-level assistance, revision checks, approved resume versions, request replay handling, and consent cancellation.
 

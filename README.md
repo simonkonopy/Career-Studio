@@ -18,7 +18,7 @@ cp .env.example .env
 npm start
 ```
 
-Open `http://127.0.0.1:4174`. Manual profile editing, accounts, resume versions, and the tracker work without an AI key. To enable the interview and AI job assessment/tailoring, privately configure `OPENAI_API_KEY` in `.env` and restart. Check that `OPENAI_MODEL` is available to the API project before inviting users. Never put credentials in the browser, source code, screenshots, or GitHub.
+Open `http://127.0.0.1:4174`. Accounts, manual profile editing, guided interviews, resume versions, and the tracker work without an AI key. In a real account, choose any skill and save answers to prepared follow-up questions without AI consent or remaining AI allowance. Guided answers persist across reloads; they do not call an external AI service, consume AI allowance, or create profile claims or proposals. To enable optional AI interview follow-ups and AI job assessment/tailoring, privately configure `OPENAI_API_KEY` in `.env` and restart. Check that `OPENAI_MODEL` is available to the API project before inviting users. Never put credentials in the browser, source code, screenshots, or GitHub.
 
 To explore the populated customer experience without signing in, open `/demo` or choose **Explore demo** on the sign-in screen. This walkthrough uses fictional profiles, jobs, applications, and scripted AI responses. Its edits stay in browser memory and reset on reload; it does not create an account, call the AI provider, or access customer records. Sample text/PDF downloads are available; real document processing remains in the authenticated product.
 
@@ -28,7 +28,7 @@ The server stores customer information in `data/career.sqlite` by default. That 
 
 1. Create an account and securely save the one-time recovery code.
 2. Upload a resume or start fresh; review extracted details before using them.
-3. Build the career profile with work, education, task-level skills, examples, and job preferences. With AI enabled and consent given, answer follow-up questions and individually accept or reject proposed facts.
+3. Build the career profile with work, education, task-level skills, examples, and job preferences. Use the guided interview to save answers and work through prepared questions, then add confirmed details in Your story. Optional AI assistance requires consent and available allowance; it can use saved interview history and new answers to suggest facts for individual acceptance or rejection.
 4. Review the profile and create a resume. Edit and approve the draft before Word export. Approved versions remain preserved and can be attached to applications.
 5. Browse public remote listings or paste a posting. Assess requirements, supported experience, gaps, and unknowns; create a tailored resume when appropriate.
 6. Save jobs and record application stages, notes, follow-up dates, and the resume used.
@@ -36,6 +36,7 @@ The server stores customer information in `data/career.sqlite` by default. That 
 ## Implemented boundaries
 
 - Password accounts with private server sessions, recovery codes, customer ownership checks, and persistent profiles, conversations, resumes, applications, and AI request allowances.
+- Authenticated guided interview at `POST /api/interview/guided`: prepared questions for any skill, durable answers and topic progress, and replay protection, independent of AI availability and allowance.
 - Server-side AI requests with consent, a per-customer daily attempt allowance, a service-wide daily ceiling, bounded concurrency, and replay protection. Allowances reset at midnight UTC; failed or interrupted attempts can still count.
 - Evidence-linked AI suggestions and approval before profile changes. AI output remains a draft for customer review; semantic truth cannot be guaranteed by automated checks.
 - Server parsing for supported uploads; imported text may contain sensitive details. Known contact fields are removed from AI requests where possible, but redaction is not complete anonymization.
@@ -57,7 +58,7 @@ Tests use temporary customer data and simulated upstream responses; they should 
 
 ## GitHub handoff
 
-Start with [HANDOFF.md](HANDOFF.md) for the engineer's entry point. The [product pitch and handoff deck (PowerPoint)](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx) and [PDF edition](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) provide the visual overview. The 29-slide deck opens with a "Start here" reading path for each audience, then three parts: what the product does (problem, origin, why it differs from general chat tools, the customer journey, fictional-demo screenshots), what is built and how to run it (built versus remaining, launch plan, AI access, system architecture, code map, rules to preserve, hosting, launch gates), and how to pilot and sell it (known risks, the first customer experiment, the demo script, packaging experiments, pilot measures). Workflows and instructions are drawn as block diagrams. Its speaker notes carry sources and presentation guidance.
+Start with [HANDOFF.md](HANDOFF.md) for the engineer's entry point. The [product pitch and handoff deck (PowerPoint)](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pptx) and [PDF edition](docs/CAREER_STUDIO_HANDOFF_2026-09-09.pdf) provide the visual overview. The written engineering and security guides also cover the newer guided-interview fix. The 29-slide deck opens with a "Start here" reading path for each audience, then three parts: what the product does (problem, origin, why it differs from general chat tools, the customer journey, fictional-demo screenshots), what is built and how to run it (built versus remaining, launch plan, AI access, system architecture, code map, rules to preserve, hosting, launch gates), and how to pilot and sell it (known risks, the first customer experiment, the demo script, packaging experiments, pilot measures). Workflows and instructions are drawn as block diagrams. Its speaker notes carry sources and presentation guidance.
 
 The next engineer should follow [Engineering handoff](docs/ENGINEERING_HANDOFF.md), [SaaS business and release plan](docs/SAAS_BUSINESS_PLAN.md), and [Security instructions](docs/SECURITY.md). [Customer subscription delivery](docs/CUSTOMER_SUBSCRIPTION_DELIVERY.md) specifies a future ChatGPT plugin, customer onboarding, and a separate local-companion research path; none is implemented yet. The product owner can use the [Sales playbook](docs/SALES_PLAYBOOK.md) for the pitch, five-minute demo, customer discovery, pilot measurements, and accurate answers to objections. These documents supersede historical subscription-harness proposals for this release. The presentation contains approved fictional demo images; exclude unscreened screenshots and customer content from the transfer.
 
@@ -65,4 +66,4 @@ The [Design handoff](docs/DESIGN_HANDOFF.md) preserves Fable’s redesigned pres
 
 Copy `HANDOFF.md`, `server.js`, `lib/`, `public/`, `scripts/backup.js`, `tests/`, `docs/`, `package.json`, `package-lock.json`, `.env.example`, `.gitignore`, `.dockerignore`, `Dockerfile`, `.github/`, and this README into a fresh directory. Review the files for personal data before the first commit and create a new private repository with fresh history. Keep real customer data, `.env`, `data/`, `backups/`, `node_modules/`, browser traces, test output, and unscreened screenshots out of that transfer.
 
-For hosting, backups, restoration, and pilot launch requirements, follow [Operations](docs/OPERATIONS.md). The Docker image runs as a non-root user and expects a single server instance, a persistent volume, an HTTPS reverse proxy, a configured API key, and a private pilot invitation code. Hosting and database storage, job-source rights, support, and AI usage remain operator expenses.
+For hosting, backups, restoration, and pilot launch requirements, follow [Operations](docs/OPERATIONS.md). The Docker image runs as a non-root user and expects a single server instance, a persistent volume, an HTTPS reverse proxy, a private pilot invitation code, and a configured API key when optional AI features are enabled. Hosting and database storage, job-source rights, support, and AI usage remain operator expenses.

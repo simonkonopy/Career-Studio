@@ -17,13 +17,15 @@ before(async () => {
 });
 after(async () => browser?.close());
 const posting = { id: 'sample-1', title: 'Inventory Coordinator', role: 'Inventory Coordinator', company: 'Example Goods', employer: 'Example Goods', url: 'https://remotive.com/remote-jobs/operations/example-1', link: 'https://remotive.com/remote-jobs/operations/example-1', description: 'Maintain inventory lists in Excel. Independently use VLOOKUP. Check the required location and current work authorization.', location: 'United States', pay: 'USD 65000–80000', source: 'Remotive', work_mode: 'remote' };
-async function fixture(t, { enabled = false, width = 1440 } = {}) {
+async function fixture(t, { enabled = false, width = 1440, dailyLimit = 8 } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'career-browser-'));
   const reservation = net.createServer(); await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
   const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
   const base = `http://127.0.0.1:${port}`;
-  const config = { port, host: '127.0.0.1', origin: base, production: false, inviteCode: '', dataDir: directory, dailyLimit: 8, globalLimit: 80, concurrency: 3 };
+  const config = { port, host: '127.0.0.1', origin: base, production: false, inviteCode: '', dataDir: directory, dailyLimit, globalLimit: 80, concurrency: 3 };
   const ai = { enabled, async interview({ messages }) { return { message: 'Tell me how you maintained the stock lists.', questions: [{ question: 'Which Excel tasks can you repeat without help?', reason: 'Distinguish independent work from help.' }], proposals: [{ label: 'Describe the work you did', path: 'basics.summary', value: 'Maintained stock lists in Excel.', evidence: messages.at(-1).content }], usage: { inputTokens: 12, outputTokens: 20 } }; }, async assess() { return { summary: 'Your recordkeeping connects to this work. Confirm the remaining requirements.', relevance: 'possible', matches: [{ requirement: 'Inventory records', evidence: 'Maintained stock lists in Excel.' }], gaps: [{ requirement: 'Independent VLOOKUP', reason: 'Only assisted use is confirmed.' }], unknowns: ['Work authorization and location eligibility are not confirmed.'], questions: ['Can you use VLOOKUP independently?'], usage: { inputTokens: 12, outputTokens: 20 } }; }, async tailor({ profile }) { return { summary: profile.basics.summary, experience: [], skills: [], notes: ['Confirm work authorization directly with the employer.'], usage: { inputTokens: 10, outputTokens: 15 } }; } };
+  const aiCalls = [];
+  for (const name of ['interview', 'assess', 'tailor']) { const run = ai[name]; ai[name] = async (...args) => { aiCalls.push(name); return run(...args); }; }
   const app = createApp({ config, ai, feed: async query => ({ jobs: !query || /inventory|excel/i.test(query) ? [posting] : [], source: 'Remotive', attribution: 'Remote jobs provided by Remotive' }) });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' });
@@ -33,7 +35,7 @@ async function fixture(t, { enabled = false, width = 1440 } = {}) {
   page.on('dialog', dialog => dialog.accept());
   t.after(async () => { await context.close(); app.server.closeAllConnections(); await app.close(); fs.rmSync(directory, { recursive: true, force: true }); assert.deepEqual(errors, [], 'No client script errors'); });
   await page.goto(base);
-  return { page, app, base, context };
+  return { page, app, base, context, aiCalls };
 }
 async function signUp(page, email = 'alex@example.test') {
   await page.getByRole('button', { name: 'Create an account', exact: true }).click();
@@ -259,9 +261,17 @@ test('resume upload preserves original text, requires review, and escapes untrus
 
 test('AI interview requires consent and leaves changes pending until accepted', async t => {
   const { page } = await fixture(t, { enabled: true }); await signUp(page); await basicProfile(page);
-  await go(page, 'Interview'); assert.equal(await page.getByLabel('Your answer', { exact: true }).isDisabled(), true);
-  await page.getByRole('button', { name: 'Enable my interview guide', exact: true }).click();
-  await page.getByLabel('Your answer', { exact: true }).fill('I maintained weekly stock lists in Excel, with help for VLOOKUP.');
+  await go(page, 'Interview'); assert.equal(await page.getByLabel('Your answer', { exact: true }).isEnabled(), true);
+  const answer = 'I maintained weekly stock lists in Excel, with help for VLOOKUP.';
+  await page.getByLabel('Your answer', { exact: true }).fill(answer);
+  assert.equal((await stateOf(page)).ai.consent, false);
+  await page.getByRole('button', { name: 'Enable AI assistance', exact: true }).click();
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), answer);
+  await page.getByRole('button', { name: 'Use guided questions', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Save answer & continue', exact: true }).isEnabled(), true);
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), answer);
+  await page.getByRole('button', { name: 'Use AI follow-ups', exact: true }).click();
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), answer);
   await page.getByRole('button', { name: 'Send →', exact: true }).click();
   await page.getByRole('heading', { name: 'Describe the work you did' }).waitFor();
   if (process.env.CAREER_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.CAREER_SCREENSHOT_DIR, 'career-studio-interview.png'), fullPage: true });
@@ -331,4 +341,72 @@ test('the customer interface fits a narrow screen and preserves readable skill c
   await page.getByLabel('VLOOKUP', { exact: true }).selectOption('assisted'); await save(page);
   const layout = await page.evaluate(() => ({ width: innerWidth, content: document.documentElement.scrollWidth })); assert.ok(layout.content <= layout.width, JSON.stringify(layout));
   if (screenshotDir) await page.screenshot({ path: path.join(screenshotDir, 'career-studio-skills-mobile.png'), fullPage: true });
+});
+
+
+test('guided interview saves answers and any-skill questions without an AI key on mobile', async t => {
+  const { page, aiCalls } = await fixture(t, { width: 390 }); await signUp(page); await go(page, 'Interview');
+  const answer = page.getByLabel('Your answer', { exact: true });
+  assert.equal(await answer.isEnabled(), true);
+  await answer.fill('I check purchase records and ask a colleague to review exceptions.');
+  await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#interview-message')?.value === '');
+  assert.match(await page.locator('#messages').innerText(), /I check purchase records/);
+  const chooser = page.locator('form[data-form="interview-skill"]');
+  for (const skill of ['AI tools', 'Accounting', 'Programming', 'Ceramic glazing']) {
+    await page.getByLabel('Skill to explore', { exact: true }).fill(skill);
+    assert.equal(await chooser.getByRole('button', { name: 'Ask about this skill' }).isEnabled(), true);
+    const response = page.waitForResponse(r => r.url().endsWith('/api/interview/guided') && r.request().method() === 'POST');
+    await chooser.getByRole('button', { name: 'Ask about this skill' }).click(); await response;
+    await page.waitForFunction(() => !document.querySelector('#interview-message')?.disabled);
+    assert.match(await page.locator('#messages .assistant').last().innerText(), /Guided interview/);
+    assert.ok((await page.locator('#messages .assistant').last().innerText()).includes(skill));
+  }
+  const saved = await stateOf(page);
+  assert.equal(saved.usage.used, 0); assert.deepEqual(saved.profile.skills, []); assert.deepEqual(saved.interview.proposals, []);
+  assert.deepEqual(aiCalls, []);
+  await page.reload(); await go(page, 'Interview');
+  assert.match(await page.locator('#messages').innerText(), /I check purchase records/);
+  assert.match(await page.locator('#messages').innerText(), /Ceramic glazing/);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+});
+
+test('guided interview preserves uncertain saves and retries once after connection and server errors', async t => {
+  const { page, aiCalls } = await fixture(t, { enabled: true }); await signUp(page); await go(page, 'Interview');
+  const bodies = [];
+  await page.route('**/api/interview/guided', async route => {
+    bodies.push(route.request().postDataJSON());
+    if (bodies.length === 1) { await route.fetch(); await route.abort('failed'); }
+    else if (bodies.length === 3) { await route.fetch(); await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Temporary response failure' }) }); }
+    else await route.continue();
+  });
+  for (const [index, text] of ['I write SQL reports with help reviewing joins.', 'I check the report totals against source records.'].entries()) {
+    await page.getByLabel('Your answer', { exact: true }).fill(text);
+    await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: index ? 'Temporary response failure' : 'We could not reach the studio' }).waitFor();
+    assert.equal(await page.getByLabel('Your answer', { exact: true }).inputValue(), text);
+    await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#interview-message')?.value === '');
+    assert.equal(bodies[index * 2].requestId, bodies[index * 2 + 1].requestId);
+    const saved = await stateOf(page);
+    assert.equal(saved.interview.messages.filter(m => m.role === 'user' && m.content === text).length, 1);
+    assert.equal(saved.ai.consent, false); assert.equal(saved.usage.used, 0); assert.deepEqual(aiCalls, []);
+  }
+  assert.equal(bodies.length, 4);
+});
+
+test('AI allowance exhaustion leaves guided answers usable without more provider calls', async t => {
+  const { page, aiCalls } = await fixture(t, { enabled: true, dailyLimit: 1 }); await signUp(page); await basicProfile(page);
+  await go(page, 'Interview'); await page.getByRole('button', { name: 'Enable AI assistance', exact: true }).click();
+  await page.getByLabel('Your answer', { exact: true }).fill('I maintained stock lists in Excel.');
+  await page.getByRole('button', { name: 'Send →', exact: true }).click();
+  await page.getByRole('button', { name: 'Save answer & continue', exact: true }).waitFor();
+  assert.equal(await page.getByLabel('Your answer', { exact: true }).isEnabled(), true);
+  await page.getByLabel('Your answer', { exact: true }).fill('For accounting, I match invoices with purchase orders.');
+  await page.getByRole('button', { name: 'Save answer & continue', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#interview-message')?.value === '');
+  const saved = await stateOf(page);
+  assert.equal(saved.usage.used, 1); assert.equal(saved.usage.remaining, 0); assert.deepEqual(aiCalls, ['interview']);
+  assert.equal(saved.interview.proposals.length, 1);
+  assert.match(await page.locator('#messages').innerText(), /I match invoices with purchase orders/);
 });

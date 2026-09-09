@@ -30,7 +30,7 @@ function createApp(options={}){
   const ai=options.ai||createAI({apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL||'gpt-5.6-terra'});
   const docs=options.documents||Documents;
   const feed=options.feed||createJobFeed({cache:store.cache});
-  const authLimit=Auth.limiter(),generalLimit=Auth.limiter({max:300,windowMs:60000});
+  const authLimit=Auth.limiter(),generalLimit=Auth.limiter({max:300,windowMs:60000}),guidedLimit=Auth.limiter({max:60,windowMs:60000});
   const active=new Map(); let activeCount=0,authActive=0;
   const cookieName='career_session';
   const allowedHost=new URL(config.origin).host;
@@ -108,6 +108,15 @@ function createApp(options={}){
         if(route==='/api/state'&&method==='GET')return send(res,200,store.state(uid,ai.enabled));
         if(route==='/api/profile'&&method==='PUT'){const body=await readJSON(req);if(!body.profile||typeof body.profile!=='object'||Array.isArray(body.profile))throw new StoreError(400,'A career profile is required.');return send(res,200,store.saveProfile(uid,body.profile,body.revision));}
         if(route==='/api/consent'&&method==='POST'){const body=await readJSON(req,2048);if(typeof body.enabled!=='boolean')throw new StoreError(400,'Choose whether to enable AI.');store.consent(uid,body.enabled);if(!body.enabled)active.get(uid)?.abort();return send(res,200,store.state(uid,ai.enabled));}
+        if(route==='/api/interview/guided'&&method==='POST'){
+          const body=await readJSON(req,32000);
+          if(typeof body.message!=='string'||!body.message.trim()||body.message.length>6000||body.message.includes('\u0000'))throw new StoreError(400,'Write an answer or choose a skill, using 1 to 6,000 characters.');
+          if(typeof body.requestId!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(body.requestId))throw new StoreError(400,'A valid request identifier is required.');
+          if(body.topic!==undefined&&(typeof body.topic!=='string'||body.topic.length>200||/[\u0000-\u001f\u007f]/.test(body.topic)))throw new StoreError(400,'Choose a skill name of 200 characters or fewer.');
+          guidedLimit(uid);
+          store.guidedInterview(uid,body.requestId,{message:body.message.trim(),topic:body.topic?.trim()||''});
+          return send(res,200,store.state(uid,ai.enabled));
+        }
         if(route==='/api/interview'&&method==='POST'){
           const body=await readJSON(req,16000),message=safeText(body.message,6000);if(!message)throw new StoreError(400,'Write an answer or tell us what you would like to explore.');if(body.message.length>6000)throw new StoreError(400,'Keep each answer under 6,000 characters.');
           await runAI(uid,body,'interview',async signal=>{

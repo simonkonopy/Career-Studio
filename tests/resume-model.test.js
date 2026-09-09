@@ -126,3 +126,32 @@ test('canonical task labels preserve an existing rating when a normalized alias 
   const browser = vm.runInNewContext(Resume.browserSource + '; ResumeModel;');
   assert.equal(browser.normalizeSkillTaskLabel('  Check joints independently  '), 'Check joints');
 });
+
+test('guided questions cover any chosen skill without inferring proficiency or modifying a profile', () => {
+  for (const name of ['AI', 'Accounting', 'programing', 'Harp restoration']) {
+    const profile = Resume.normalizeProfile({ skills: [{ name }] });
+    const before = JSON.stringify(profile);
+    const first = Resume.guidedInterviewReply({ profile, topic: name, message: "Let's explore my skill: " + name });
+    assert.match(first.message, /Guided interview \(no AI\)/);
+    assert.equal(first.questions.length, 1);assert.ok(first.questions[0].question.includes(name));assert.equal(first.step, 0);
+    const second = Resume.guidedInterviewReply({ profile, message: 'I do this with help.', previous: first });
+    assert.equal(second.topic, name);assert.equal(second.step, 1);assert.match(second.questions[0].question, /real example/);
+    const third = Resume.guidedInterviewReply({ profile, message: 'A colleague checked the result.', previous: second });
+    assert.equal(third.step, 2);assert.match(third.questions[0].question, /last use|how often/);
+    assert.equal(JSON.stringify(profile), before);assert.deepEqual(profile.skills[0].tasks, {});
+    assert.equal(first.proposals, undefined);
+  }
+});
+
+test('guided selection can ask for clarification, restart a topic, or retain a custom skill without AI inference', () => {
+  const unclear = Resume.guidedInterviewReply({ message: 'I have worked for many years.' });
+  assert.equal(unclear.topic, '');assert.match(unclear.questions[0].question, /Which skill or tool/);
+  const custom = Resume.guidedInterviewReply({ message: 'Harp restoration', previous: unclear });
+  assert.equal(custom.topic, 'Harp restoration');assert.match(custom.questions[0].question, /specific activities/);
+  const reset = Resume.guidedInterviewReply({ topic: 'AI', message: "Let's explore my skill: AI", previous: { topic: 'AI', step: 5 } });
+  assert.equal(reset.step, 0);assert.match(reset.questions[0].question, /prompts/);
+  const answer = Resume.guidedInterviewReply({ message: 'I know how to check the output', previous: reset });
+  assert.equal(answer.topic, 'AI');assert.equal(answer.step, 1);
+  const browser = vm.runInNewContext(Resume.browserSource + '; ResumeModel;');
+  assert.equal(browser.guidedInterviewReply({ topic: 'Accounting', message: 'Explore accounting' }).questions[0].question, Resume.guidedInterviewReply({ topic: 'Accounting', message: 'Explore accounting' }).questions[0].question);
+});

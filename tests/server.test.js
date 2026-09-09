@@ -163,3 +163,70 @@ test('approving a corrected suggestion prevents an older interview batch from re
   assert.equal((await c.request(`/api/proposals/${old.id}/accept`,{method:'POST',body:{}})).status,409);
   assert.equal(f.store.profile(account.user.id).profile.basics.summary,'Corrected draft');
 });
+
+test('guided interviews work without an API key or AI consent and never change profile claims or budgets',async t=>{
+  for(const aiEnabled of [false,true]){
+    const f=await fixture(t,{aiEnabled});const c=await f.client();const account=await signup(c);
+    const before=(await c.request('/api/state')).data;
+    const reply=await c.request('/api/interview/guided',{method:'POST',body:{message:"Let's explore my skill: Accounting",topic:'Accounting',requestId:randomUUID()}});
+    assert.equal(reply.status,200);assert.equal(reply.data.interview.messages.length,2);
+    const guide=reply.data.interview.messages.at(-1);assert.match(guide.content,/Guided interview \(no AI\)/);assert.match(guide.questions[0].question,/Accounting/);assert.equal(guide.questions.length,1);
+    assert.deepEqual(reply.data.profile,before.profile);assert.equal(reply.data.revision,before.revision);assert.deepEqual(reply.data.interview.proposals,[]);
+    assert.equal(reply.data.ai.consent,false);assert.equal(f.ai.calls,0);assert.equal(f.store.usage(account.user.id).used,0);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM global_usage').get().n,0);
+    const answer=await c.request('/api/interview/guided',{method:'POST',body:{message:'I match invoices with help from a colleague.',requestId:randomUUID()}});
+    assert.equal(answer.status,200);assert.equal(answer.data.interview.messages.length,4);assert.match(answer.data.interview.messages.at(-1).questions[0].question,/real example of Accounting/);
+    assert.deepEqual(answer.data.profile,before.profile);assert.equal(answer.data.usage.used,0);
+  }
+});
+
+test('guided conversation continues after AI allowance is exhausted and receipts bind mode and input',async t=>{
+  const f=await fixture(t,{dailyLimit:1});const c=await f.client();await signup(c);await c.request('/api/consent',{method:'POST',body:{enabled:true}});
+  const aiBody={message:'I use Excel with help.',requestId:randomUUID()};assert.equal((await c.request('/api/interview',{method:'POST',body:aiBody})).status,200);
+  const globalBefore=f.store.db.prepare('SELECT attempts FROM global_usage').get().attempts;
+  const guidedBody={message:"Let's explore my skill: Harp restoration",topic:'Harp restoration',requestId:randomUUID()};
+  const first=await c.request('/api/interview/guided',{method:'POST',body:guidedBody});assert.equal(first.status,200);assert.equal(first.data.usage.remaining,0);assert.equal(first.data.interview.messages.length,4);
+  const replay=await c.request('/api/interview/guided',{method:'POST',body:guidedBody});assert.equal(replay.status,200);assert.equal(replay.data.interview.messages.length,4);
+  assert.equal((await c.request('/api/interview/guided',{method:'POST',body:{...guidedBody,message:'Changed answer'}})).status,409);
+  assert.equal((await c.request('/api/interview/guided',{method:'POST',body:{...guidedBody,topic:'Programming'}})).status,409);
+  assert.equal((await c.request('/api/interview/guided',{method:'POST',body:aiBody})).status,409);
+  assert.equal((await c.request('/api/interview',{method:'POST',body:guidedBody})).status,409);
+  assert.equal(f.ai.calls,1);assert.equal(f.store.db.prepare('SELECT attempts FROM global_usage').get().attempts,globalBefore);
+});
+
+test('guided routes retain authentication, CSRF, input bounds and account-owned progression across reload',async t=>{
+  const f=await fixture(t,{aiEnabled:false});const a=await f.client(),b=await f.client(),anonymous=await f.client();await signup(a);await signup(b,'blair@example.test');
+  const body={message:"Let's explore my skill: Programming",topic:'Programming',requestId:randomUUID()};
+  assert.equal((await anonymous.request('/api/interview/guided',{method:'POST',body})).status,401);
+  assert.equal((await a.request('/api/interview/guided',{method:'POST',body,headers:{'X-CSRF-Token':''}})).status,403);
+  assert.equal((await a.request('/api/interview/guided',{method:'POST',body,headers:{Origin:'https://evil.example'}})).status,403);
+  for(const input of [{...body,message:''},{...body,message:42},{...body,message:'x'.repeat(6001)},{...body,message:'hidden\u0000text'},{...body,topic:{}},{...body,topic:'x'.repeat(201)},{...body,topic:'bad\nname'},{...body,requestId:'short'}]){
+    assert.equal((await a.request('/api/interview/guided',{method:'POST',body:input})).status,400);
+  }
+  assert.equal((await a.request('/api/interview/guided',{method:'POST',body})).status,200);
+  assert.equal((await b.request('/api/state')).data.interview.messages.length,0);
+  const bReply=await b.request('/api/interview/guided',{method:'POST',body:{...body,topic:'Accounting',message:"Let's explore my skill: Accounting"}});
+  assert.equal(bReply.status,200);assert.match(bReply.data.interview.messages.at(-1).questions[0].question,/Accounting/);
+  const fresh=await f.client();await fresh.request('/api/auth/login',{method:'POST',body:{email:'alex@example.test',password:'Correct horse staple 27'}});
+  const next=await fresh.request('/api/interview/guided',{method:'POST',body:{message:'I debug Python with help.',requestId:randomUUID()}});
+  assert.equal(next.status,200);assert.match(next.data.interview.messages.at(-1).questions[0].question,/real example of Programming/);assert.doesNotMatch(JSON.stringify(next.data.interview),/Accounting/);
+  const userId=f.store.userByEmail('alex@example.test').id;
+  const reopened=createStore(path.join(f.directory,'test.sqlite'));
+  try{
+    const counts=reopened.messages(userId).length;
+    assert.equal(reopened.guidedInterview(userId,body.requestId,{message:body.message,topic:body.topic}).cached,true);
+    assert.equal(reopened.messages(userId).length,counts);
+    reopened.guidedInterview(userId,randomUUID(),{message:'I last used it this week.',topic:''});
+    assert.match(reopened.messages(userId).at(-1).questions[0].question,/When did you last use Programming/);
+  }finally{reopened.close();}
+  assert.equal(f.ai.calls,0);
+});
+
+test('guided requests support bounded Unicode text and apply an account-level rate limit without AI usage',async t=>{
+  const f=await fixture(t,{aiEnabled:false});const a=await f.client(),b=await f.client();await signup(a);await signup(b,'blair@example.test');
+  const body={message:'界'.repeat(6000),topic:'Translation',requestId:randomUUID()};
+  for(let count=0;count<60;count++)assert.equal((await a.request('/api/interview/guided',{method:'POST',body})).status,200);
+  const limited=await a.request('/api/interview/guided',{method:'POST',body});assert.equal(limited.status,429);assert.equal(limited.data.code,'RATE_LIMIT');
+  assert.equal((await b.request('/api/interview/guided',{method:'POST',body:{message:"Let's explore my skill: AI",topic:'AI',requestId:randomUUID()}})).status,200);
+  const state=(await a.request('/api/state')).data;assert.equal(state.interview.messages.length,2);assert.equal(state.interview.messages[0].content.length,6000);assert.equal(state.usage.used,0);assert.equal(f.ai.calls,0);
+});
